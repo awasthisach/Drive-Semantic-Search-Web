@@ -7,9 +7,11 @@ import { formatBytes } from '../lib/driveApi';
 interface DuplicateFinderProps {
   files: DriveFile[];
   onRemoveFiles: (ids: string[]) => void;
+  onVerifyHashes?: (fileIds: string[]) => Promise<void>;
+  verifyBusy?: boolean;
 }
 
-export const DuplicateFinder: React.FC<DuplicateFinderProps> = ({ files, onRemoveFiles }) => {
+export const DuplicateFinder: React.FC<DuplicateFinderProps> = ({ files, onRemoveFiles, onVerifyHashes, verifyBusy }) => {
   const [selectedDuplicates, setSelectedDuplicates] = useState<Set<string>>(() => new Set());
   const duplicateGroups = findDuplicates(files);
   const totalReclaimable = duplicateGroups.reduce((acc, group) => acc + group.reclaimableSize, 0);
@@ -21,7 +23,6 @@ export const DuplicateFinder: React.FC<DuplicateFinderProps> = ({ files, onRemov
   );
 
   const toggleSelect = (id: string) => {
-    // Candidates (size/name only) cannot be selected for trash
     if (!confirmedIds.has(id)) return;
     const next = new Set(selectedDuplicates);
     if (next.has(id)) next.delete(id);
@@ -30,7 +31,6 @@ export const DuplicateFinder: React.FC<DuplicateFinderProps> = ({ files, onRemov
   };
 
   const handleSelectAllDuplicates = () => {
-    // Safety: bulk-select only SHA-256 confirmed groups — never size/name candidates
     const next = new Set<string>();
     duplicateGroups.forEach(group => {
       if (!group.hash.startsWith('sha256:')) return;
@@ -42,7 +42,6 @@ export const DuplicateFinder: React.FC<DuplicateFinderProps> = ({ files, onRemov
   const handleDeselectAll = () => setSelectedDuplicates(new Set());
 
   const handleCleanSelected = () => {
-    // Double-gate: only SHA-256 confirmed ids may be trashed from this UI
     const safe = Array.from(selectedDuplicates).filter(id => confirmedIds.has(id));
     if (safe.length === 0) return;
     onRemoveFiles(safe);
@@ -61,11 +60,11 @@ export const DuplicateFinder: React.FC<DuplicateFinderProps> = ({ files, onRemov
               <div className="flex items-center gap-2 flex-wrap">
                 <h2 className="text-lg sm:text-xl font-bold tracking-tight">Duplicate Candidate Cleaner</h2>
                 <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                  Size/name · sha256 when offline-pinned
+                  Size/name · sha256 when verified
                 </span>
               </div>
               <p className="text-xs sm:text-sm text-zinc-400 mt-1 max-w-xl">
-                Size+name groups are candidates only — trash is disabled until offline pin produces SHA-256 confirmation.
+                Trash locked until SHA-256 verify. Use Verify candidates to hash Drive files (download/export).
               </p>
             </div>
           </div>
@@ -81,7 +80,7 @@ export const DuplicateFinder: React.FC<DuplicateFinderProps> = ({ files, onRemov
         <div className="text-center py-12 rounded-2xl border border-dashed border-zinc-300 dark:border-zinc-800">
           <CheckCircle className="w-12 h-12 text-emerald-500 mx-auto mb-3" />
           <h3 className="text-base font-bold">No candidate groups</h3>
-          <p className="text-xs text-zinc-500 mt-1">Pin files offline to enable SHA-256 confirmed groups.</p>
+          <p className="text-xs text-zinc-500 mt-1">Sync Drive files, then verify hashes for confirmed duplicates.</p>
         </div>
       ) : (
         <div className="space-y-4">
@@ -94,6 +93,21 @@ export const DuplicateFinder: React.FC<DuplicateFinderProps> = ({ files, onRemov
               <button type="button" onClick={handleDeselectAll} className="text-zinc-500 hover:underline">
                 Clear selection
               </button>
+              {onVerifyHashes && (
+                <button
+                  type="button"
+                  disabled={verifyBusy}
+                  onClick={() => {
+                    const ids = duplicateGroups
+                      .filter(g => !g.hash.startsWith('sha256:'))
+                      .flatMap(g => g.files.map(f => f.id));
+                    if (ids.length) onVerifyHashes(ids);
+                  }}
+                  className="text-emerald-600 hover:underline font-medium disabled:opacity-50"
+                >
+                  {verifyBusy ? 'Verifying SHA-256…' : 'Verify candidates (SHA-256)'}
+                </button>
+              )}
             </div>
             <button
               type="button"
@@ -117,7 +131,19 @@ export const DuplicateFinder: React.FC<DuplicateFinderProps> = ({ files, onRemov
                   <span className={`font-bold ${confirmed ? 'text-emerald-600' : 'text-amber-600'}`}>
                     {confirmed ? 'confirmed SHA-256' : 'candidate (size + name) — trash locked'}
                   </span>
-                  <span className="text-zinc-500">{group.fileCount} files · reclaim ~{formatBytes(group.reclaimableSize)}</span>
+                  <div className="flex items-center gap-2">
+                    {!confirmed && onVerifyHashes && (
+                      <button
+                        type="button"
+                        disabled={verifyBusy}
+                        className="text-[10px] font-bold text-emerald-600 hover:underline disabled:opacity-50"
+                        onClick={() => onVerifyHashes(group.files.map(f => f.id))}
+                      >
+                        Verify group
+                      </button>
+                    )}
+                    <span className="text-zinc-500">{group.fileCount} files · reclaim ~{formatBytes(group.reclaimableSize)}</span>
+                  </div>
                 </div>
                 <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">
                   {group.files.map((file, idx) => (
@@ -133,7 +159,7 @@ export const DuplicateFinder: React.FC<DuplicateFinderProps> = ({ files, onRemov
                       ) : (
                         <span
                           className="w-4 h-4 inline-block rounded border border-dashed border-zinc-300 dark:border-zinc-600 opacity-40 shrink-0"
-                          title="Verify offline (SHA-256) before trash"
+                          title="Verify SHA-256 before trash"
                         />
                       )}
                       <FileText className="w-4 h-4 text-zinc-400 shrink-0" />
