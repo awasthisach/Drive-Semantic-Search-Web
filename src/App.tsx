@@ -28,6 +28,7 @@ import {
   listOfflineMeta,
 } from './lib/offlineCache';
 import { withDriveAuthRetry } from './lib/driveAuth';
+import { verifyFilesHashQueue } from './lib/hashVerifier';
 
 const DeviceStorageScanner = React.lazy(() =>
   import('./components/DeviceStorageScanner').then(m => ({ default: m.DeviceStorageScanner }))
@@ -77,6 +78,7 @@ export default function App() {
   });
   const [previewFile, setPreviewFile] = useState<DriveFile | null>(null);
   const [searchMoveTargetFile, setSearchMoveTargetFile] = useState<DriveFile | null>(null);
+  const [verifyBusy, setVerifyBusy] = useState(false);
   const [userProfile, setUserProfile] = useState({ name: 'User', email: '', avatar: '', isConnected: false });
 
   const showDriveToast = (msg: string) => {
@@ -356,12 +358,7 @@ export default function App() {
   const handleDeleteFile = async (id: string) => {
     const fileToDelete = files.find(f => f.id === id);
     if (!fileToDelete) return;
-    const token = (await ensureValidToken()) || googleAccessToken || (await getAccessToken());
     if (fileToDelete.isGoogleDriveItem) {
-      if (!token) {
-        showDriveToast('Sign in required to delete Drive files');
-        return;
-      }
       try {
         await withDriveAuthRetry(
           async () => (await ensureValidToken()) || googleAccessToken || (await getAccessToken()),
@@ -389,11 +386,6 @@ export default function App() {
       setFiles(prev => prev.filter(f => !localIds.has(f.id)));
     }
     if (driveItems.length === 0) return;
-    const token = (await ensureValidToken()) || googleAccessToken || (await getAccessToken());
-    if (!token) {
-      showDriveToast('Sign in required to delete Drive files');
-      return;
-    }
     const succeeded: string[] = [];
     const failed: string[] = [];
     for (const f of driveItems) {
@@ -567,6 +559,31 @@ export default function App() {
     showDriveToast('Marked offline (local index only — no file bytes)');
   };
 
+  const handleVerifyHashes = async (fileIds: string[]) => {
+    const token = (await ensureValidToken()) || googleAccessToken || (await getAccessToken());
+    if (!token) {
+      showDriveToast('Sign in required to verify file hashes');
+      return;
+    }
+    setGoogleAccessToken(token);
+    const targets = files.filter(f => fileIds.includes(f.id) && f.isGoogleDriveItem);
+    if (!targets.length) return;
+    setVerifyBusy(true);
+    showDriveToast('Verifying SHA-256 for ' + targets.length + ' file(s)…');
+    try {
+      const { ok, failed } = await verifyFilesHashQueue(token, targets, {
+        onHashed: (id, contentHash, size) => {
+          setFiles(prev => prev.map(f => (f.id === id ? { ...f, contentHash, size: size || f.size } : f)));
+        },
+      });
+      showDriveToast('Hash verify done: ' + ok + ' ok, ' + failed + ' failed');
+    } catch (e: any) {
+      showDriveToast('Hash verify error: ' + (e?.message || 'error'));
+    } finally {
+      setVerifyBusy(false);
+    }
+  };
+
   const handleAddVaultFile = async (file: VaultFile) => {
     setVaultFiles(prev => [file, ...prev]);
     try {
@@ -642,12 +659,24 @@ export default function App() {
         )}
         {activeTab === 'search' && (
           <React.Suspense fallback={<TabLoadingFallback />}>
-            <SemanticSearch files={files} folders={folders} onSelectFile={setPreviewFile} onMoveFile={f => setSearchMoveTargetFile(f)} />
+            <SemanticSearch
+              files={files}
+              folders={folders}
+              onSelectFile={setPreviewFile}
+              onMoveFile={f => setSearchMoveTargetFile(f)}
+              accessToken={googleAccessToken}
+              onRequestToken={async () => (await ensureValidToken()) || googleAccessToken || (await getAccessToken())}
+            />
           </React.Suspense>
         )}
         {activeTab === 'duplicates' && (
           <React.Suspense fallback={<TabLoadingFallback />}>
-            <DuplicateFinder files={files} onRemoveFiles={handleRemoveMultipleFiles} />
+            <DuplicateFinder
+              files={files}
+              onRemoveFiles={handleRemoveMultipleFiles}
+              onVerifyHashes={handleVerifyHashes}
+              verifyBusy={verifyBusy}
+            />
           </React.Suspense>
         )}
         {activeTab === 'vault' && (
