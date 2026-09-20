@@ -1,3 +1,4 @@
+import { useRef } from 'react';
 import { DriveFile, VaultFile, FolderItem } from '../types';
 import { googleSignIn, googleSignOut, getAccessToken, ensureValidToken } from '../lib/firebaseAuth';
 import {
@@ -38,6 +39,8 @@ export function useDriveHandlersCore(s: DriveAppState) {
     showDriveToast,
   } = s;
 
+  const syncInFlightRef = useRef(false);
+
   const handleUploadFile = (newFile: DriveFile) => setFiles(prev => [newFile, ...prev]);
 
   const handleUploadToDrive = async (file: File) => {
@@ -65,65 +68,54 @@ export function useDriveHandlersCore(s: DriveAppState) {
 
   const handleConnectDemoDrive = () => {
     setIsGoogleConnected(true);
-    setUserProfile(p => ({ ...p, name: 'Demo Drive', isConnected: true }));
+    setGoogleAccessToken('demo-token');
     setFiles(INITIAL_FILES);
     setFolders(INITIAL_FOLDERS);
-    showDriveToast('Demo Google Drive Connected');
+    setSyncStats(s => ({
+      ...s,
+      status: 'synced',
+      totalSyncedCount: INITIAL_FILES.length,
+      lastSynced: new Date().toISOString(),
+    }));
+    showDriveToast('Demo Drive loaded');
   };
 
   const handleGoogleSignIn = async () => {
     try {
       setIsGoogleLoading(true);
       const result = await googleSignIn();
-      if (result) {
-        setGoogleAccessToken(result.accessToken);
-        setIsGoogleConnected(true);
-        try {
-          const drives = await listSharedDrives(result.accessToken);
-          setSharedDrives(drives);
-        } catch (e) {
-          console.warn('Shared drives list skipped:', e);
-          setSharedDrives([]);
-        }
-        setUserProfile({
-          name: result.user.displayName || 'Google Drive User',
-          email: result.user.email || '',
-          avatar: result.user.photoURL || '',
-          isConnected: true,
-        });
-        try {
-          const syncResult = await runDriveSync({
-            token: result.accessToken,
-            typeToUse: driveFileTypeFilter,
-            corpus: driveCorpus,
-            driveId: sharedDriveId || undefined,
-            currentFiles: files,
-            currentFolders: folders,
-          });
-          setDriveTruncated(syncResult.truncated);
-          setFiles(syncResult.files);
-          setFolders(syncResult.folders);
-          setSyncStats(s => ({
-            ...s,
-            status: 'synced',
-            totalSyncedCount: syncResult.files.filter(f => f.isGoogleDriveItem).length,
-            lastSynced: new Date().toISOString(),
-          }));
-          showDriveToast(syncResult.message);
-        } catch (e: any) {
-          showDriveToast('Connected but sync issue: ' + (e?.message || 'retry Sync Now'));
-        }
-      } else {
-        showDriveToast('Google Sign-In cancelled.');
+      setIsGoogleConnected(true);
+      setGoogleAccessToken(result.accessToken);
+      setUserProfile(result.user);
+      try {
+        const drives = await listSharedDrives(result.accessToken);
+        setSharedDrives(drives);
+      } catch (e) {
+        console.warn('listSharedDrives', e);
       }
+      const syncResult = await runDriveSync({
+        token: result.accessToken,
+        typeToUse: driveFileTypeFilter,
+        corpus: driveCorpus,
+        driveId: sharedDriveId || undefined,
+        currentFiles: [],
+        currentFolders: [],
+      });
+      setDriveTruncated(syncResult.truncated);
+      setFiles(syncResult.files);
+      setFolders(syncResult.folders);
+      setSyncStats(s => ({
+        ...s,
+        status: 'synced',
+        totalSyncedCount: syncResult.files.filter(f => f.isGoogleDriveItem).length,
+        lastSynced: new Date().toISOString(),
+      }));
+      showDriveToast(syncResult.message || 'Signed in and synced');
     } catch (err: any) {
-      const message = err?.message || 'Unable to connect to Google Drive';
-      if (message.includes('popup-closed') || message.includes('cancelled')) {
-        showDriveToast('Sign-In cancelled.');
-      } else {
-        setAuthErrorMessage(message);
-        setAuthErrorModalOpen(true);
-      }
+      console.error(err);
+      setAuthErrorMessage(err?.message || 'Sign-in failed');
+      setAuthErrorModalOpen(true);
+      showDriveToast('Sign-in failed: ' + (err?.message || 'error'));
     } finally {
       setIsGoogleLoading(false);
     }
@@ -131,20 +123,18 @@ export function useDriveHandlersCore(s: DriveAppState) {
 
   const handleGoogleSignOut = async () => {
     try {
-      await googleSignOut({ revoke: true });
-      setIsGoogleConnected(false);
-      setGoogleAccessToken(null);
-      setDriveTruncated(false);
-      setSharedDrives([]);
-      setDriveCorpus('user');
-      setSharedDriveId('');
-      setUserProfile(p => ({ ...p, isConnected: false, email: '' }));
-      setFiles(INITIAL_FILES);
-      setFolders(INITIAL_FOLDERS);
-      showDriveToast('Signed out and revoked Drive access');
-    } catch (err) {
-      console.error('Sign-out error:', err);
+      await googleSignOut();
+    } catch (e) {
+      console.warn(e);
     }
+    setIsGoogleConnected(false);
+    setGoogleAccessToken(null);
+    setUserProfile(null);
+    setSharedDrives([]);
+    setFiles([]);
+    setFolders([]);
+    setSyncStats(s => ({ ...s, status: 'idle', totalSyncedCount: 0 }));
+    showDriveToast('Signed out');
   };
 
   const handleSyncGoogleDrive = async (
@@ -152,8 +142,14 @@ export function useDriveHandlersCore(s: DriveAppState) {
     corpusOverride?: DriveCorpus,
     driveIdOverride?: string
   ) => {
+    if (syncInFlightRef.current) {
+      showDriveToast('Sync already in progress');
+      return;
+    }
+    syncInFlightRef.current = true;
     let token = (await ensureValidToken()) || googleAccessToken || (await getAccessToken());
     if (!token) {
+      syncInFlightRef.current = false;
       handleGoogleSignIn();
       return;
     }
@@ -210,6 +206,7 @@ export function useDriveHandlersCore(s: DriveAppState) {
       }
     } finally {
       setIsGoogleLoading(false);
+      syncInFlightRef.current = false;
     }
   };
 
