@@ -29,6 +29,9 @@ export function useDriveHandlersRest(s: DriveAppState) {
     showDriveToast,
   } = s;
 
+  // Cancel in-flight offline pin when a new pin starts (avoids stale state writes)
+  let offlineAbort: AbortController | null = null;
+
   const handleDeleteFile = async (id: string) => {
     const fileToDelete = files.find(f => f.id === id);
     if (!fileToDelete) return;
@@ -167,7 +170,11 @@ export function useDriveHandlersRest(s: DriveAppState) {
       }
       return;
     }
+    offlineAbort?.abort();
+    offlineAbort = new AbortController();
+    const { signal } = offlineAbort;
     const token = (await ensureValidToken()) || googleAccessToken || (await getAccessToken());
+    if (signal.aborted) return;
     if (!token && file.isGoogleDriveItem) {
       showDriveToast('Sign in required to pin Drive file offline');
       return;
@@ -177,6 +184,7 @@ export function useDriveHandlersRest(s: DriveAppState) {
       let downloadName: string | undefined;
       if (file.isGoogleDriveItem && token) {
         const res = await downloadDriveFileBytes(token, file.id, file.mimeType);
+        if (signal.aborted) return;
         blob = res.blob;
         downloadName = res.downloadName ? file.name + res.downloadName : undefined;
       } else {
@@ -184,12 +192,14 @@ export function useDriveHandlersRest(s: DriveAppState) {
         return;
       }
       const hash = await sha256Blob(blob);
+      if (signal.aborted) return;
       const result = await putOfflineBlob(file.id, blob, {
         name: downloadName || file.name,
         mimeType: blob.type || file.mimeType,
         size: blob.size,
         sha256: hash,
       });
+      if (signal.aborted) return;
       const offlineIds = new Set((await listOfflineMeta()).map(m => m.id));
       setFiles(prev =>
         prev.map(f => {
@@ -208,6 +218,7 @@ export function useDriveHandlersRest(s: DriveAppState) {
         showDriveToast('Pinned offline: ' + file.name);
       }
     } catch (err: any) {
+      if (signal.aborted) return;
       console.error(err);
       showDriveToast('Offline pin failed: ' + (err?.message || 'error'));
     }
