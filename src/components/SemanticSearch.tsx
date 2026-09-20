@@ -56,7 +56,7 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
 
   useEffect(() => {
     let cancelled = false;
-    (async () => {
+    const handle = window.setTimeout(async () => {
       setSearching(true);
       try {
         const r = await runHybridSearch(query, files, selectedCategory);
@@ -64,8 +64,11 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
       } finally {
         if (!cancelled) setSearching(false);
       }
-    })();
-    return () => { cancelled = true; };
+    }, 350); // debounce: avoid full index scan on every keystroke
+    return () => {
+      cancelled = true;
+      window.clearTimeout(handle);
+    };
   }, [query, files, selectedCategory]);
 
   const driveFilesCount = files.filter(f => f.isGoogleDriveItem).length;
