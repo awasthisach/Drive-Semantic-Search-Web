@@ -1,5 +1,6 @@
 import { DriveFile, FolderItem } from '../types';
 import { getCategoryFromMime } from './driveApi';
+import { fetchWithBackoff } from './rateLimit';
 
 const FOLDER_COLORS = ['blue', 'emerald', 'purple', 'amber', 'rose', 'indigo', 'cyan', 'zinc'];
 
@@ -29,9 +30,10 @@ export async function listSharedDrives(accessToken: string): Promise<SharedDrive
       fields: 'nextPageToken,drives(id,name)',
     });
     if (pageToken) params.set('pageToken', pageToken);
-    const res = await fetch(
+    const res = await fetchWithBackoff(
       `https://www.googleapis.com/drive/v3/drives?${params.toString()}`,
-      { headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' } }
+      { headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' } },
+      { label: 'listSharedDrives', maxRetries: 4, baseMs: 400 }
     );
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
@@ -100,7 +102,7 @@ export async function fetchGoogleDriveData(
     }
     if (pageToken) params.set('pageToken', pageToken);
 
-    const response = await fetch(
+    const response = await fetchWithBackoff(
       `https://www.googleapis.com/drive/v3/files?${params.toString()}`,
       {
         method: 'GET',
@@ -108,7 +110,8 @@ export async function fetchGoogleDriveData(
           Authorization: `Bearer ${accessToken}`,
           Accept: 'application/json',
         },
-      }
+      },
+      { label: 'files.list', maxRetries: 5, baseMs: 500 }
     );
 
     if (!response.ok) {
