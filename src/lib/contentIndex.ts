@@ -90,11 +90,12 @@ export async function putIndexedDocument(
   const truncated = doc.text.length > MAX_INDEX_CHARS || Boolean(doc.textTruncated);
   const text = doc.text.slice(0, MAX_INDEX_CHARS);
   const chunks = chunkText(text);
+  // Store only a short preview on the document row; full body lives in chunks (heap-friendly).
   const record: IndexedDocument = {
     id: doc.id,
     name: doc.name,
     mimeType: doc.mimeType,
-    text,
+    text: text.slice(0, 2000),
     charCount: text.length,
     chunkCount: chunks.length,
     indexedAt: new Date().toISOString(),
@@ -220,7 +221,13 @@ export async function searchContentIndex(
   const out = new Map<string, { score: number; snippet: string }>();
   if (!terms.length) return out;
 
-  const chunks = await getAllChunks();
+  let chunks = await getAllChunks();
+  /** Soft cap to protect browser heap on very large indexes (scan first N chunks). */
+  const MAX_SCAN = 40_000;
+  if (chunks.length > MAX_SCAN) {
+    console.warn('[contentIndex] scanning first ' + MAX_SCAN + ' of ' + chunks.length + ' chunks');
+    chunks = chunks.slice(0, MAX_SCAN);
+  }
   const N = Math.max(chunks.length, 1);
   const df = new Map<string, number>();
   for (const term of terms) {
