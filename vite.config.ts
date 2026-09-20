@@ -84,7 +84,7 @@ export default defineConfig(() => {
     ],
     build: {
       target: 'esnext',
-      sourcemap: false,
+      sourcemap: 'hidden',
       chunkSizeWarningLimit: 600,
       rollupOptions: {
         output: {
