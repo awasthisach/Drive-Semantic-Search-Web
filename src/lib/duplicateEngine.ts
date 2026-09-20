@@ -2,8 +2,9 @@ import { DriveFile, DuplicateGroup } from '../types';
 
 /**
  * Groups likely duplicates.
- * Primary key: contentHash when present (sha256:… preferred).
- * Fallback: same size + normalized name.
+ * Primary: contentHash when sha256:…
+ * Fallback: same size + normalized name — only when size > 0.
+ * Files with unknown size (0) are never size+name grouped.
  */
 export function findDuplicates(files: DriveFile[]): DuplicateGroup[] {
   const hashMap = new Map<string, DriveFile[]>();
@@ -11,7 +12,11 @@ export function findDuplicates(files: DriveFile[]): DuplicateGroup[] {
   files.forEach(file => {
     let key = file.contentHash;
     if (!key || key.startsWith('gdrive-') || key.startsWith('user-')) {
-      key = `size:${file.size}|name:${(file.name || '').toLowerCase()}`;
+      if (!file.size || file.size <= 0) {
+        key = `unique:${file.id}`;
+      } else {
+        key = `size:${file.size}|name:${(file.name || '').toLowerCase()}`;
+      }
     }
     const existing = hashMap.get(key) || [];
     existing.push(file);
@@ -21,7 +26,7 @@ export function findDuplicates(files: DriveFile[]): DuplicateGroup[] {
   const duplicateGroups: DuplicateGroup[] = [];
 
   hashMap.forEach((groupFiles, hash) => {
-    if (groupFiles.length > 1) {
+    if (groupFiles.length > 1 && !hash.startsWith('unique:')) {
       const singleSize = groupFiles[0].size;
       const totalSize = groupFiles.reduce((s, f) => s + f.size, 0);
       const reclaimableSize = totalSize - singleSize;

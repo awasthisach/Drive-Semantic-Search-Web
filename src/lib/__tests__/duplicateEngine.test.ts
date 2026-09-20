@@ -48,4 +48,12 @@ describe('findDuplicates', () => {
     ];
     expect(findDuplicates(files)).toEqual([]);
   });
+
+  it('does not group unknown size (0) by name alone', () => {
+    const files = [
+      makeFile({ id: '1', name: 'same.pdf', size: 0 }),
+      makeFile({ id: '2', name: 'same.pdf', size: 0 }),
+    ];
+    expect(findDuplicates(files)).toEqual([]);
+  });
 });
