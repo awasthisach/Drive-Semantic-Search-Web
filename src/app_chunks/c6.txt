@@ -1,0 +1,60 @@
+ceStorageScanner
+              onImportToDrive={(file) => { handleUploadFile(file); showDriveToast('Imported to local list: ' + file.name); }}
+              onImportToVault={() => showDriveToast('Use Vault tab to encrypt notes')}
+            />
+          </React.Suspense>
+        )}
+        {activeTab === 'offline' && (
+          <React.Suspense fallback={<TabLoadingFallback />}>
+            <OfflineFilesList files={files} onToggleOffline={handleToggleOffline} onSelectFile={setPreviewFile} />
+          </React.Suspense>
+        )}
+      </main>
+
+      <OfflineIndicator />
+
+      {driveNotification && (
+        <div className="fixed bottom-4 right-4 z-50 flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-zinc-900 text-zinc-100 shadow-2xl text-xs font-semibold max-w-sm">
+          <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+          <span>{driveNotification}</span>
+          <button type="button" onClick={() => setDriveNotification(null)}><X className="w-3.5 h-3.5" /></button>
+        </div>
+      )}
+
+      <AuthErrorModal
+        isOpen={authErrorModalOpen}
+        errorMessage={authErrorMessage}
+        onClose={() => setAuthErrorModalOpen(false)}
+        onRetrySignIn={() => { setAuthErrorModalOpen(false); handleGoogleSignIn(); }}
+        onConnectDemoDrive={() => { setAuthErrorModalOpen(false); handleConnectDemoDrive(); }}
+        isLoading={isGoogleLoading}
+      />
+
+      {previewFile && (
+        <React.Suspense fallback={null}>
+          <FilePreviewModal
+            file={previewFile}
+            onClose={() => setPreviewFile(null)}
+            onToggleOffline={() => handleToggleOffline(previewFile.id)}
+            onMove={() => { setSearchMoveTargetFile(previewFile); setPreviewFile(null); }}
+          />
+        </React.Suspense>
+      )}
+
+      {searchMoveTargetFile && (
+        <MoveToFolderModal
+          isOpen={Boolean(searchMoveTargetFile)}
+          onClose={() => setSearchMoveTargetFile(null)}
+          selectedFiles={[searchMoveTargetFile]}
+          folders={folders}
+          allFiles={files}
+          onConfirmMove={(folderId) => {
+            handleMoveFilesToFolder([searchMoveTargetFile.id], folderId);
+            setSearchMoveTargetFile(null);
+          }}
+          onCreateFolder={handleCreateFolder}
+        />
+      )}
+    </div>
+  );
+}
