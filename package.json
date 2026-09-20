@@ -5,12 +5,12 @@
   "type": "module",
   "packageManager": "npm@10",
   "scripts": {
-    "dev": "vite --port=3000 --host=0.0.0.0",
-    "assemble-app": "node scripts/assemble-app.js",
-    "build": "node scripts/assemble-app.js && NODE_ENV=production vite build",
+    "dev": "node scripts/assemble-app.cjs && vite --port=3000 --host=0.0.0.0",
+    "assemble-app": "node scripts/assemble-app.cjs",
+    "build": "node scripts/assemble-app.cjs && NODE_ENV=production vite build",
     "preview": "vite preview",
     "clean": "rm -rf dist",
-    "lint": "node scripts/assemble-app.js && tsc --noEmit",
+    "lint": "node scripts/assemble-app.cjs && tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest"
   },
