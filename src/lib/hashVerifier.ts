@@ -1,9 +1,10 @@
 /**
  * Drive content hashing: download/export bytes → SHA-256.
- * Sequential queue with soft rate limit.
+ * Sequential queue with soft rate limit + backoff on 429/403.
  */
 
 import { downloadDriveFileBytes, sha256Blob } from './offlineCache';
+import { sleep } from './rateLimit';
 import type { DriveFile } from '../types';
 
 export type HashProgress = {
@@ -43,18 +44,24 @@ export async function verifyFilesHashQueue(
       const { sha256, size } = await hashDriveFile(accessToken, file);
       opts.onHashed?.(file.id, 'sha256:' + sha256, size);
       ok++;
+      await sleep(120);
     } catch (e: any) {
+      const msg = String(e?.message || e || '');
       failed++;
       opts.onProgress?.({
         done,
         total: list.length,
         currentName: file.name,
-        lastError: e?.message || 'hash failed',
+        lastError: msg || 'hash failed',
       });
+      if (/429|403|rate.?limit|userRateLimit/i.test(msg)) {
+        await sleep(2000 + Math.random() * 2000);
+      } else {
+        await sleep(120);
+      }
     }
     done++;
     opts.onProgress?.({ done, total: list.length, currentName: file.name });
-    await new Promise(r => setTimeout(r, 120));
   }
 
   return { ok, failed };
