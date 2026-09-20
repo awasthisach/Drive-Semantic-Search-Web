@@ -1,3 +1,4 @@
+import { fetchWithBackoff } from './rateLimit';
 /**
  * IndexedDB cache for offline-pinned file bytes.
  * Quota: max total bytes + max entries; true LRU — getOfflineBlob touches cachedAt.
@@ -254,21 +255,25 @@ export function getNativeExportHint(mimeType: string): { exportMime: string; ext
 export async function downloadDriveFileBytes(
   accessToken: string,
   fileId: string,
-  mimeType: string
+  mimeType: string,
+  opts?: { signal?: AbortSignal }
 ): Promise<{ blob: Blob; downloadName?: string }> {
   const native = NATIVE_EXPORT[mimeType];
+  const headers = { Authorization: 'Bearer ' + accessToken };
   if (native) {
-    const res = await fetch(
+    const res = await fetchWithBackoff(
       `https://www.googleapis.com/drive/v3/files/${fileId}/export?mimeType=${encodeURIComponent(native.exportMime)}`,
-      { headers: { Authorization: 'Bearer ' + accessToken } }
+      { headers, signal: opts?.signal },
+      { label: 'files.export', maxRetries: 4, baseMs: 400 }
     );
     if (!res.ok) throw new Error('Export failed: ' + res.status);
     return { blob: await res.blob(), downloadName: native.ext };
   }
 
-  const res = await fetch(
+  const res = await fetchWithBackoff(
     `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`,
-    { headers: { Authorization: 'Bearer ' + accessToken } }
+    { headers, signal: opts?.signal },
+    { label: 'files.download', maxRetries: 4, baseMs: 400 }
   );
   if (!res.ok) throw new Error('Download failed: ' + res.status);
   return { blob: await res.blob() };
