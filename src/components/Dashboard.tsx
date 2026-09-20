@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import {
   UploadCloud, Star, CheckCircle2, Cloud,
-  X, CheckSquare, Square, Search, RefreshCw,
+  X, CheckSquare, Square, Search, RefreshCw, FolderInput,
 } from 'lucide-react';
 import { DriveFile, FileCategory, VaultFile, FolderItem } from '../types';
 import { formatBytes } from '../lib/driveApi';
@@ -63,7 +63,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
   };
 
   const filteredFiles = useMemo(() => {
-    // Same ranking as Semantic Search tab (metadata/keyword — not document body)
     let list = files;
     if (filterCategory === 'starred') list = list.filter(f => f.starred);
     else if (filterCategory === 'google_drive') list = list.filter(f => f.isGoogleDriveItem);
@@ -230,14 +229,35 @@ export const Dashboard: React.FC<DashboardProps> = ({
         </label>
       </div>
 
-      {selectedFilesList.length > 0 && (
-        <div className="flex items-center gap-2 text-xs">
-          <span className="font-semibold">{selectedFilesList.length} selected</span>
-          <button type="button" className="px-2 py-1 rounded-lg border" onClick={() => { setMoveTargetFiles(selectedFilesList); setIsMoveModalOpen(true); }}>Move</button>
-          <button type="button" className="px-2 py-1 rounded-lg border text-red-600" onClick={() => { setDeleteTargetFiles(selectedFilesList); setIsDeleteModalOpen(true); }}>Delete</button>
-          <button type="button" className="px-2 py-1 rounded-lg border" onClick={() => setSelectedFileIds(new Set())}>Clear</button>
-        </div>
-      )}
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <button
+          type="button"
+          className="px-2.5 py-1.5 rounded-lg border border-zinc-200 dark:border-zinc-700 font-semibold"
+          onClick={() => {
+            if (selectedFileIds.size === filteredFiles.length) setSelectedFileIds(new Set());
+            else setSelectedFileIds(new Set(filteredFiles.map(f => f.id)));
+          }}
+        >
+          {selectedFileIds.size === filteredFiles.length && filteredFiles.length > 0 ? 'Deselect all' : 'Select all visible'}
+        </button>
+        {selectedFilesList.length > 0 && (
+          <>
+            <span className="font-semibold text-blue-600">{selectedFilesList.length} selected</span>
+            <button
+              type="button"
+              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-indigo-600 text-white font-bold"
+              onClick={() => { setMoveTargetFiles(selectedFilesList); setIsMoveModalOpen(true); }}
+            >
+              <FolderInput className="w-3.5 h-3.5" /> Move to folder
+            </button>
+            <button type="button" className="px-2 py-1.5 rounded-lg border text-red-600 font-semibold" onClick={() => { setDeleteTargetFiles(selectedFilesList); setIsDeleteModalOpen(true); }}>Delete</button>
+            <button type="button" className="px-2 py-1.5 rounded-lg border" onClick={() => setSelectedFileIds(new Set())}>Clear</button>
+          </>
+        )}
+        {selectedFilesList.length === 0 && (
+          <span className="text-zinc-500">Tip: checkbox select + <strong>Move to folder</strong>, ya card pe <strong>Move</strong></span>
+        )}
+      </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
         {filteredFiles.map(file => (
@@ -252,9 +272,23 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 <div className="text-[11px] text-zinc-500 mt-0.5">{formatBytes(file.size)} • {file.category}</div>
                 {file.isGoogleDriveItem && <span className="text-[10px] text-blue-600 font-semibold">Drive</span>}
               </div>
-              <button type="button" onClick={e => { e.stopPropagation(); onToggleStar(file.id); }}>
-                <Star className={`w-4 h-4 ${file.starred ? 'text-amber-500 fill-amber-500' : 'text-zinc-400'}`} />
-              </button>
+              <div className="flex flex-col items-end gap-1 shrink-0">
+                <button type="button" onClick={e => { e.stopPropagation(); onToggleStar(file.id); }} title="Star">
+                  <Star className={`w-4 h-4 ${file.starred ? 'text-amber-500 fill-amber-500' : 'text-zinc-400'}`} />
+                </button>
+                <button
+                  type="button"
+                  title="Move to folder"
+                  className="inline-flex items-center gap-0.5 text-[10px] font-bold text-indigo-600 hover:underline"
+                  onClick={e => {
+                    e.stopPropagation();
+                    setMoveTargetFiles([file]);
+                    setIsMoveModalOpen(true);
+                  }}
+                >
+                  <FolderInput className="w-3.5 h-3.5" /> Move
+                </button>
+              </div>
             </div>
           </div>
         ))}
