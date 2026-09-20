@@ -21,6 +21,8 @@ interface SemanticSearchProps {
   onMoveFile?: (file: DriveFile) => void;
   accessToken?: string | null;
   onRequestToken?: () => Promise<string | null>;
+  /** Scope content index records to My Drive / Shared Drive */
+  corpusKey?: string;
 }
 
 const SAMPLE_PROMPTS = [
@@ -36,6 +38,7 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
   onMoveFile,
   accessToken,
   onRequestToken,
+  corpusKey,
 }) => {
   const [query, setQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all');
@@ -115,6 +118,7 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
             source,
             driveModifiedTime: f.modifiedTime,
             textTruncated: wasTrunc,
+            corpusKey,
           });
           ok++;
           if (wasTrunc) truncated++;
