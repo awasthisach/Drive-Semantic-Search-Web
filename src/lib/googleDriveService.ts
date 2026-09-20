@@ -22,6 +22,9 @@ export interface SharedDriveInfo {
 }
 
 export async function listSharedDrives(accessToken: string): Promise<SharedDriveInfo[]> {
+  if (!accessToken || typeof accessToken !== 'string') {
+    throw new Error('listSharedDrives: accessToken is required');
+  }
   const drives: SharedDriveInfo[] = [];
   let pageToken: string | undefined;
   for (let i = 0; i < 40; i++) {
@@ -196,9 +199,10 @@ export async function moveGoogleDriveFile(
 ): Promise<void> {
   let previousParents = currentParentIds.join(',');
   if (!previousParents) {
-    const metaRes = await fetch(
+    const metaRes = await fetchWithBackoff(
       `https://www.googleapis.com/drive/v3/files/${fileId}?fields=parents&supportsAllDrives=true`,
-      { headers: { Authorization: `Bearer ${accessToken}` } }
+      { headers: { Authorization: `Bearer ${accessToken}` } },
+      { label: 'files.get.parents', maxRetries: 3, baseMs: 400 }
     );
     if (metaRes.ok) {
       const meta = await metaRes.json();
@@ -210,7 +214,7 @@ export async function moveGoogleDriveFile(
   if (previousParents) params.set('removeParents', previousParents);
   params.set('fields', 'id,parents');
   params.set('supportsAllDrives', 'true');
-  const response = await fetch(
+  const response = await fetchWithBackoff(
     `https://www.googleapis.com/drive/v3/files/${fileId}?${params.toString()}`,
     {
       method: 'PATCH',
@@ -218,7 +222,8 @@ export async function moveGoogleDriveFile(
         Authorization: `Bearer ${accessToken}`,
         'Content-Type': 'application/json',
       },
-    }
+    },
+    { label: 'files.move', maxRetries: 4, baseMs: 400 }
   );
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
@@ -230,17 +235,21 @@ export async function createGoogleDriveFolder(
   accessToken: string,
   name: string
 ): Promise<{ id: string; name: string }> {
-  const response = await fetch('https://www.googleapis.com/drive/v3/files?supportsAllDrives=true', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
+  const response = await fetchWithBackoff(
+    'https://www.googleapis.com/drive/v3/files?supportsAllDrives=true',
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        name,
+        mimeType: 'application/vnd.google-apps.folder',
+      }),
     },
-    body: JSON.stringify({
-      name,
-      mimeType: 'application/vnd.google-apps.folder',
-    }),
-  });
+    { label: 'files.createFolder', maxRetries: 4, baseMs: 400 }
+  );
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
     throw new Error(errorData?.error?.message || `Failed to create folder: ${response.status}`);
@@ -252,7 +261,7 @@ export async function deleteGoogleDriveFile(
   accessToken: string,
   fileId: string
 ): Promise<void> {
-  const response = await fetch(
+  const response = await fetchWithBackoff(
     `https://www.googleapis.com/drive/v3/files/${fileId}?supportsAllDrives=true`,
     {
       method: 'PATCH',
@@ -261,7 +270,8 @@ export async function deleteGoogleDriveFile(
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ trashed: true }),
-    }
+    },
+    { label: 'files.trash', maxRetries: 4, baseMs: 400 }
   );
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
@@ -274,7 +284,7 @@ export async function starGoogleDriveFile(
   fileId: string,
   starred: boolean
 ): Promise<void> {
-  const response = await fetch(
+  const response = await fetchWithBackoff(
     `https://www.googleapis.com/drive/v3/files/${fileId}?supportsAllDrives=true`,
     {
       method: 'PATCH',
@@ -283,7 +293,8 @@ export async function starGoogleDriveFile(
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ starred }),
-    }
+    },
+    { label: 'files.star', maxRetries: 4, baseMs: 400 }
   );
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
@@ -321,7 +332,7 @@ export async function uploadGoogleDriveFile(
     new Blob([closeDelim]),
   ]);
 
-  const response = await fetch(
+  const response = await fetchWithBackoff(
     'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,mimeType,size,modifiedTime,createdTime,webViewLink,iconLink,parents,thumbnailLink&supportsAllDrives=true',
     {
       method: 'POST',
@@ -330,7 +341,8 @@ export async function uploadGoogleDriveFile(
         'Content-Type': 'multipart/related; boundary=' + boundary,
       },
       body,
-    }
+    },
+    { label: 'files.upload', maxRetries: 4, baseMs: 500 }
   );
 
   if (!response.ok) {
