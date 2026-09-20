@@ -25,6 +25,7 @@ describe('applyDriveChanges', () => {
     const r = applyDriveChanges(files, [], [{ fileId: 'a', removed: true }]);
     expect(r.files.map(f => f.id)).toEqual(['b']);
     expect(r.removed).toBe(1);
+    expect(r.removedIds).toEqual(['a']);
   });
 
   it('adds new files from change payload', () => {
