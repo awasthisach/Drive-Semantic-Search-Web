@@ -10,6 +10,8 @@ const CHUNK_STORE = 'chunks';
 
 export const CHUNK_SIZE = 800;
 export const CHUNK_OVERLAP = 120;
+/** Max characters stored per document body (export/binary text). */
+export const MAX_INDEX_CHARS = 500_000;
 
 export interface IndexedDocument {
   id: string;
@@ -20,6 +22,10 @@ export interface IndexedDocument {
   chunkCount: number;
   indexedAt: string;
   source: 'export' | 'binary-text' | 'offline-blob';
+  /** Drive modifiedTime at index time — used for stale detection */
+  driveModifiedTime?: string;
+  /** True when body was truncated to MAX_INDEX_CHARS */
+  textTruncated?: boolean;
 }
 
 export interface IndexedChunk {
@@ -66,20 +72,35 @@ export function chunkText(text: string): string[] {
   return chunks;
 }
 
+/** True when Drive file is newer than the last indexed snapshot (or never indexed). */
+export function isDocumentStale(
+  existing: IndexedDocument | null | undefined,
+  driveModifiedTime?: string
+): boolean {
+  if (!existing) return true;
+  if (!driveModifiedTime) return false;
+  if (!existing.driveModifiedTime) return true;
+  return driveModifiedTime > existing.driveModifiedTime;
+}
+
 export async function putIndexedDocument(
   doc: Omit<IndexedDocument, 'charCount' | 'chunkCount' | 'indexedAt'> & { text: string }
 ): Promise<IndexedDocument> {
   const db = await openDb();
-  const chunks = chunkText(doc.text);
+  const truncated = doc.text.length > MAX_INDEX_CHARS || Boolean(doc.textTruncated);
+  const text = doc.text.slice(0, MAX_INDEX_CHARS);
+  const chunks = chunkText(text);
   const record: IndexedDocument = {
     id: doc.id,
     name: doc.name,
     mimeType: doc.mimeType,
-    text: doc.text,
-    charCount: doc.text.length,
+    text,
+    charCount: text.length,
     chunkCount: chunks.length,
     indexedAt: new Date().toISOString(),
     source: doc.source,
+    driveModifiedTime: doc.driveModifiedTime,
+    textTruncated: truncated,
   };
 
   await new Promise<void>((resolve, reject) => {
@@ -90,8 +111,8 @@ export async function putIndexedDocument(
     const req = idx.getAllKeys(doc.id);
     req.onsuccess = () => {
       for (const key of req.result || []) cs.delete(key);
-      chunks.forEach((text, i) => {
-        cs.put({ id: doc.id + '#' + i, fileId: doc.id, idx: i, text } as IndexedChunk);
+      chunks.forEach((t, i) => {
+        cs.put({ id: doc.id + '#' + i, fileId: doc.id, idx: i, text: t } as IndexedChunk);
       });
     };
     tx.oncomplete = () => resolve();
@@ -99,6 +120,39 @@ export async function putIndexedDocument(
   });
 
   return record;
+}
+
+export async function removeIndexedDocument(id: string): Promise<void> {
+  try {
+    const db = await openDb();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction([DOC_STORE, CHUNK_STORE], 'readwrite');
+      tx.objectStore(DOC_STORE).delete(id);
+      const cs = tx.objectStore(CHUNK_STORE);
+      const idx = cs.index('fileId');
+      const req = idx.getAllKeys(id);
+      req.onsuccess = () => {
+        for (const key of req.result || []) cs.delete(key);
+      };
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch (e) {
+    console.warn('[contentIndex] remove failed', id, e);
+  }
+}
+
+/** Drop index rows for files no longer present in the current Drive list. */
+export async function pruneMissingFromIndex(liveFileIds: Set<string>): Promise<number> {
+  const docs = await listIndexedDocuments();
+  let removed = 0;
+  for (const d of docs) {
+    if (!liveFileIds.has(d.id)) {
+      await removeIndexedDocument(d.id);
+      removed++;
+    }
+  }
+  return removed;
 }
 
 export async function getIndexedDocument(id: string): Promise<IndexedDocument | null> {
@@ -157,7 +211,7 @@ export async function getAllChunks(): Promise<IndexedChunk[]> {
   }
 }
 
-/** BM25-ish scoring over chunks for a query. Returns best score per fileId. */
+/** BM25-style heuristic scoring over chunks for a query. Returns best score per fileId. */
 export async function searchContentIndex(
   query: string
 ): Promise<Map<string, { score: number; snippet: string }>> {
@@ -182,18 +236,16 @@ export async function searchContentIndex(
     let score = 0;
     for (const term of terms) {
       if (!text.includes(term)) continue;
-      const tf = text.split(term).length - 1;
-      const docFreq = df.get(term) || 1;
+      const tf = (text.match(new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')) || []).length;
+      const docFreq = df.get(term) || 0;
       const idf = Math.log(1 + (N - docFreq + 0.5) / (docFreq + 0.5));
       score += (tf * idf) / (tf + 1.2);
     }
     if (score <= 0) continue;
-    if (text.includes(q)) score *= 1.35;
     const prev = out.get(ch.fileId);
     if (!prev || score > prev.score) {
-      const idx = Math.max(0, text.indexOf(terms[0]));
-      const snippet = ch.text.slice(Math.max(0, idx - 40), idx + 160).trim();
-      out.set(ch.fileId, { score, snippet: snippet || ch.text.slice(0, 160) });
+      const snippet = ch.text.slice(0, 160).trim();
+      out.set(ch.fileId, { score, snippet });
     }
   }
   return out;
