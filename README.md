@@ -21,7 +21,7 @@ Client-side web app: Google Drive sync, hybrid content search, offline pin, vaul
 
 ## Package manager
 
-**npm only**. CI: install → lint → test → build → GitHub Pages.
+**npm only** (`package-lock.json` + `npm ci` in CI). Pipeline: `npm ci` → lint (`tsc --strict`) → `npm audit` → test → build → GitHub Pages.
 
 ## Scripts
 
@@ -38,4 +38,10 @@ Client-side web app: Google Drive sync, hybrid content search, offline pin, vaul
 
 ## Stack
 
-React 19, Vite 6, Tailwind 4, Firebase Auth + GIS, Drive API v3, IndexedDB inverted postings, Web Crypto, Vitest 5.
+React 19, Vite 6, Tailwind 4, TypeScript **strict**, Firebase Auth + GIS, Drive API v3, IndexedDB inverted postings, Web Crypto, Vitest 5.
+
+## Resilience
+
+- Drive list + mutations use `fetchWithBackoff` (429/403 + Retry-After + jitter)
+- Offline pin cancels in-flight work via `AbortController`
+- Content index prune is corpus-scoped and skipped when list is truncated
