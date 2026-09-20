@@ -48,7 +48,7 @@ export async function listSharedDrives(accessToken: string): Promise<SharedDrive
 }
 
 function buildDriveQuery(fileType: DriveFileTypeFilter = 'all'): string {
-  const base = 'trashed=false';
+  const base = "trashed=false and mimeType!='application/vnd.google-apps.shortcut'";
   switch (fileType) {
     case 'documents':
       return `${base} and (mimeType='application/pdf' or mimeType='application/msword' or mimeType='application/vnd.openxmlformats-officedocument.wordprocessingml.document' or mimeType='application/vnd.google-apps.document' or mimeType='text/plain' or mimeType='application/rtf')`;
