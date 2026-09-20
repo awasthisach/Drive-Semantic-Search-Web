@@ -436,7 +436,10 @@ export default function App() {
       setFiles(prev => prev.map(f => (localIds.has(f.id) ? { ...f, folderId: targetFolderId } : f)));
     }
     const driveItems = snapshot.filter(f => f.isGoogleDriveItem);
-    if (!driveItems.length) return;
+    if (!driveItems.length) {
+      showDriveToast(localIds.size ? 'Local files updated' : 'Nothing to move');
+      return;
+    }
     const token = (await ensureValidToken()) || googleAccessToken || (await getAccessToken());
     if (!token) {
       showDriveToast('Sign in required to move Drive files');
@@ -445,16 +448,21 @@ export default function App() {
     const succeeded: string[] = [];
     for (const f of driveItems) {
       try {
-        await moveGoogleDriveFile(token, f.id, targetFolderId || 'root');
+        await withDriveAuthRetry(
+          async () => (await ensureValidToken()) || googleAccessToken || (await getAccessToken()),
+          t => setGoogleAccessToken(t),
+          tok => moveGoogleDriveFile(tok, f.id, targetFolderId || 'root')
+        );
         succeeded.push(f.id);
       } catch (err: any) {
         console.error(err);
-        showDriveToast('Move failed for ' + f.name);
+        showDriveToast('Move failed for ' + f.name + ': ' + (err?.message || 'error'));
       }
     }
     if (succeeded.length) {
       const ok = new Set(succeeded);
       setFiles(prev => prev.map(f => (ok.has(f.id) ? { ...f, folderId: targetFolderId } : f)));
+      showDriveToast('Moved ' + succeeded.length + ' file(s)');
     }
   };
 
@@ -710,7 +718,15 @@ export default function App() {
       )}
       {previewFile && (
         <React.Suspense fallback={null}>
-          <FilePreviewModal file={previewFile} onClose={() => setPreviewFile(null)} onToggleOffline={handleToggleOffline} />
+          <FilePreviewModal
+            file={previewFile}
+            onClose={() => setPreviewFile(null)}
+            onToggleOffline={handleToggleOffline}
+            onMove={f => {
+              setPreviewFile(null);
+              setSearchMoveTargetFile(f);
+            }}
+          />
         </React.Suspense>
       )}
       {searchMoveTargetFile && (
