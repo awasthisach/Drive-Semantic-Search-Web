@@ -6,7 +6,13 @@ import { DriveFile, FolderItem, SemanticSearchResult } from '../types';
 import { runHybridSearch } from '../lib/searchEngine';
 import { formatBytes } from '../lib/driveApi';
 import { canExtractText, extractDriveFileText } from '../lib/contentExtract';
-import { putIndexedDocument, listIndexedDocuments } from '../lib/contentIndex';
+import {
+  putIndexedDocument,
+  listIndexedDocuments,
+  getIndexedDocument,
+  isDocumentStale,
+  MAX_INDEX_CHARS,
+} from '../lib/contentIndex';
 
 interface SemanticSearchProps {
   files: DriveFile[];
@@ -83,20 +89,32 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
     setIndexing(true);
     let ok = 0;
     let fail = 0;
+    let skippedFresh = 0;
+    let truncated = 0;
     for (let i = 0; i < extractable.length; i++) {
       const f = extractable[i];
-      setIndexProgress(`Indexing ${i + 1}/${extractable.length}: ${f.name}`);
+      setIndexProgress(`Checking ${i + 1}/${extractable.length}: ${f.name}`);
       try {
+        const existing = await getIndexedDocument(f.id);
+        if (!isDocumentStale(existing, f.modifiedTime)) {
+          skippedFresh++;
+          continue;
+        }
+        setIndexProgress(`Indexing ${i + 1}/${extractable.length}: ${f.name}`);
         const { text, source } = await extractDriveFileText(token, f.id, f.mimeType, f.name);
         if (text && text.trim().length > 0) {
+          const wasTrunc = text.length > MAX_INDEX_CHARS;
           await putIndexedDocument({
             id: f.id,
             name: f.name,
             mimeType: f.mimeType,
-            text: text.slice(0, 500_000),
+            text: text.slice(0, MAX_INDEX_CHARS),
             source,
+            driveModifiedTime: f.modifiedTime,
+            textTruncated: wasTrunc,
           });
           ok++;
+          if (wasTrunc) truncated++;
         } else {
           fail++;
         }
@@ -105,7 +123,10 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
       }
       await new Promise(r => setTimeout(r, 100));
     }
-    setIndexProgress(`Done: ${ok} indexed, ${fail} skipped/failed`);
+    setIndexProgress(
+      `Done: ${ok} indexed, ${skippedFresh} already fresh, ${fail} skipped/failed` +
+        (truncated ? `, ${truncated} truncated to ${MAX_INDEX_CHARS.toLocaleString()} chars` : '')
+    );
     setIndexing(false);
     await refreshIndexedCount();
     const r = await runHybridSearch(query, files, selectedCategory);
@@ -123,7 +144,7 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
   return (
     <div className="space-y-6">
       <div className="rounded-xl border border-blue-200/80 dark:border-blue-900/40 bg-blue-50/80 dark:bg-blue-950/20 px-3 py-2 text-[11px] text-blue-900 dark:text-blue-200 font-medium">
-        Hybrid search: metadata keywords + extracted document body (BM25-style). Not neural embeddings.
+        Hybrid search: metadata keywords + extracted document body (BM25-style). Not neural embeddings. Bodies capped at first 500k characters; re-index after Drive edits.
         Indexed bodies: <strong>{indexedCount}</strong>
       </div>
 
