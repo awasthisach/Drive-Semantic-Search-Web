@@ -1,3 +1,4 @@
+import { useRef, useEffect } from 'react';
 import { DriveFile, VaultFile, FolderItem } from '../types';
 import { getAccessToken, ensureValidToken } from '../lib/firebaseAuth';
 import {
@@ -29,8 +30,14 @@ export function useDriveHandlersRest(s: DriveAppState) {
     showDriveToast,
   } = s;
 
-  // Cancel in-flight offline pin when a new pin starts (avoids stale state writes)
-  let offlineAbort: AbortController | null = null;
+  // Survives re-renders so a new pin can cancel an in-flight pin
+  const offlineAbortRef = useRef<AbortController | null>(null);
+  useEffect(() => {
+    return () => {
+      offlineAbortRef.current?.abort();
+      offlineAbortRef.current = null;
+    };
+  }, []);
 
   const handleDeleteFile = async (id: string) => {
     const fileToDelete = files.find(f => f.id === id);
@@ -170,9 +177,9 @@ export function useDriveHandlersRest(s: DriveAppState) {
       }
       return;
     }
-    offlineAbort?.abort();
-    offlineAbort = new AbortController();
-    const { signal } = offlineAbort;
+    offlineAbortRef.current?.abort();
+    offlineAbortRef.current = new AbortController();
+    const { signal } = offlineAbortRef.current;
     const token = (await ensureValidToken()) || googleAccessToken || (await getAccessToken());
     if (signal.aborted) return;
     if (!token && file.isGoogleDriveItem) {
@@ -183,7 +190,7 @@ export function useDriveHandlersRest(s: DriveAppState) {
       let blob: Blob;
       let downloadName: string | undefined;
       if (file.isGoogleDriveItem && token) {
-        const res = await downloadDriveFileBytes(token, file.id, file.mimeType);
+        const res = await downloadDriveFileBytes(token, file.id, file.mimeType, { signal });
         if (signal.aborted) return;
         blob = res.blob;
         downloadName = res.downloadName ? file.name + res.downloadName : undefined;
