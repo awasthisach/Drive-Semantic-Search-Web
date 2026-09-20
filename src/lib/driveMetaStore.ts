@@ -1,5 +1,6 @@
 /**
  * Durable Drive metadata snapshot in IndexedDB (survives refresh).
+ * Keys are per-corpus so My Drive / Shared Drive caches do not overwrite each other.
  */
 import type { DriveFile, FolderItem } from '../types';
 
@@ -15,6 +16,12 @@ export interface DriveMetaSnapshot {
   sharedDriveId?: string;
   savedAt: string;
   truncated?: boolean;
+}
+
+function snapshotKey(corpus: string, sharedDriveId?: string): string {
+  if (corpus === 'drive' && sharedDriveId) return 'drive:' + sharedDriveId;
+  if (corpus === 'allDrives') return 'allDrives';
+  return 'user';
 }
 
 function openDb(): Promise<IDBDatabase> {
@@ -41,8 +48,9 @@ export async function saveDriveMetaSnapshot(
   meta: { corpus: string; sharedDriveId?: string; truncated?: boolean }
 ): Promise<void> {
   const db = await openDb();
+  const key = snapshotKey(meta.corpus, meta.sharedDriveId);
   const snap: DriveMetaSnapshot = {
-    key: 'latest',
+    key,
     files: files.filter(f => f.isGoogleDriveItem),
     folders,
     corpus: meta.corpus,
@@ -52,19 +60,35 @@ export async function saveDriveMetaSnapshot(
   };
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE, 'readwrite');
+    // Also keep a 'latest' pointer for cold start before corpus is known
     tx.objectStore(STORE).put(snap);
+    tx.objectStore(STORE).put({ ...snap, key: 'latest' });
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
   });
 }
 
-export async function loadDriveMetaSnapshot(): Promise<DriveMetaSnapshot | null> {
+export async function loadDriveMetaSnapshot(
+  corpus?: string,
+  sharedDriveId?: string
+): Promise<DriveMetaSnapshot | null> {
   try {
     const db = await openDb();
+    const key =
+      corpus !== undefined ? snapshotKey(corpus, sharedDriveId) : 'latest';
     return new Promise((resolve, reject) => {
       const tx = db.transaction(STORE, 'readonly');
-      const req = tx.objectStore(STORE).get('latest');
-      req.onsuccess = () => resolve(req.result || null);
+      const req = tx.objectStore(STORE).get(key);
+      req.onsuccess = () => {
+        if (req.result) {
+          resolve(req.result);
+          return;
+        }
+        // Fallback to legacy single key
+        const legacy = tx.objectStore(STORE).get('latest');
+        legacy.onsuccess = () => resolve(legacy.result || null);
+        legacy.onerror = () => resolve(null);
+      };
       req.onerror = () => reject(req.error);
     });
   } catch (e) {
