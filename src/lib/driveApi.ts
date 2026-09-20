@@ -13,7 +13,7 @@ export const INITIAL_FILES: DriveFile[] = [
     id: 'file-1',
     name: 'Q3_Financial_Audit_Report.pdf',
     mimeType: 'application/pdf',
-    size: 4820000, // ~4.6 MB
+    size: 4820000,
     modifiedTime: '2026-09-14T14:32:00Z',
     createdTime: '2026-08-01T09:00:00Z',
     category: 'document',
@@ -29,7 +29,7 @@ export const INITIAL_FILES: DriveFile[] = [
     id: 'file-2',
     name: 'San_Francisco_Team_Offsite.jpg',
     mimeType: 'image/jpeg',
-    size: 7420000, // ~7.1 MB
+    size: 7420000,
     modifiedTime: '2026-09-12T11:15:00Z',
     createdTime: '2026-09-12T11:15:00Z',
     category: 'image',
@@ -54,7 +54,7 @@ export const INITIAL_FILES: DriveFile[] = [
     thumbnailUrl: 'https://images.unsplash.com/photo-1506146332389-18140dc7b2fb?w=480&auto=format&fit=crop&q=75',
     isOffline: false,
     isEncrypted: false,
-    contentHash: '992b4fa267c8e54826b1c41198f3992b4fa267c8', // Duplicate!
+    contentHash: '992b4fa267c8e54826b1c41198f3992b4fa267c8',
     tags: ['team', 'duplicate', 'photo'],
     semanticSummary: 'Identical duplicate copy of team offsite photography stored in downloads sync folder.',
     starred: false,
@@ -63,7 +63,7 @@ export const INITIAL_FILES: DriveFile[] = [
     id: 'file-4',
     name: 'Executive_Board_Deck_2026.pptx',
     mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-    size: 12800000, // ~12.2 MB
+    size: 12800000,
     modifiedTime: '2026-09-15T18:45:00Z',
     createdTime: '2026-09-02T10:00:00Z',
     category: 'document',
@@ -79,7 +79,7 @@ export const INITIAL_FILES: DriveFile[] = [
     id: 'file-5',
     name: 'Client_Contracts_Master_Vault.aes',
     mimeType: 'application/octet-stream',
-    size: 3100000, // 3.1 MB
+    size: 3100000,
     modifiedTime: '2026-09-10T16:00:00Z',
     createdTime: '2026-09-10T16:00:00Z',
     category: 'document',
@@ -95,7 +95,7 @@ export const INITIAL_FILES: DriveFile[] = [
     id: 'file-6',
     name: 'UI_Wireframe_Mobile_Tablet.png',
     mimeType: 'image/png',
-    size: 5120000, // ~5 MB
+    size: 5120000,
     modifiedTime: '2026-09-16T09:12:00Z',
     createdTime: '2026-09-15T14:30:00Z',
     category: 'image',
@@ -135,7 +135,7 @@ export const INITIAL_FILES: DriveFile[] = [
     folderId: 'finance',
     isOffline: false,
     isEncrypted: false,
-    contentHash: 'b2a1f0e9d8c7b6a5f4e3d2c1b0a9f8e7d6c5b4a3', // Duplicate!
+    contentHash: 'b2a1f0e9d8c7b6a5f4e3d2c1b0a9f8e7d6c5b4a3',
     tags: ['sales', 'duplicate', 'spreadsheet'],
     semanticSummary: 'Unmodified duplicate copy of sales spreadsheet synced from secondary workstation.',
     starred: false,
@@ -144,7 +144,7 @@ export const INITIAL_FILES: DriveFile[] = [
     id: 'file-9',
     name: 'Source_Code_Backup_v2.4.zip',
     mimeType: 'application/zip',
-    size: 24600000, // ~23.5 MB
+    size: 24600000,
     modifiedTime: '2026-09-08T17:22:00Z',
     createdTime: '2026-09-08T17:22:00Z',
     category: 'archive',
@@ -159,7 +159,7 @@ export const INITIAL_FILES: DriveFile[] = [
 ];
 
 export function formatBytes(bytes: number, decimals = 1): string {
-  if (bytes === 0) return '0 B';
+  if (!bytes || bytes <= 0) return 'Size unknown';
   const k = 1024;
   const dm = decimals < 0 ? 0 : decimals;
   const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
