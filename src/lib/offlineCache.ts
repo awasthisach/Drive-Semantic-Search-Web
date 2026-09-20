@@ -1,6 +1,6 @@
 /**
  * IndexedDB cache for offline-pinned file bytes.
- * Quota: max total bytes + max entries; LRU eviction by cachedAt.
+ * Quota: max total bytes + max entries; true LRU — getOfflineBlob touches cachedAt.
  * Re-pin same id replaces size without double-counting entries.
  */
 
@@ -158,13 +158,27 @@ export async function putOfflineBlob(
 export async function getOfflineBlob(id: string): Promise<Blob | null> {
   try {
     const db = await openDb();
-    return new Promise((resolve, reject) => {
+    const row = await new Promise<any>((resolve, reject) => {
       const tx = db.transaction(STORE, 'readonly');
       const req = tx.objectStore(STORE).get(id);
-      req.onsuccess = () => resolve(req.result?.blob || null);
+      req.onsuccess = () => resolve(req.result || null);
       req.onerror = () => reject(req.error);
     });
-  } catch {
+    if (!row?.blob) return null;
+    // True LRU: refresh cachedAt on access (best-effort)
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const tx = db.transaction(STORE, 'readwrite');
+        tx.objectStore(STORE).put({ ...row, cachedAt: new Date().toISOString() });
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+    } catch (e) {
+      console.warn('[offlineCache] LRU touch failed for', id, e);
+    }
+    return row.blob as Blob;
+  } catch (e) {
+    console.warn('[offlineCache] getOfflineBlob failed:', id, e);
     return null;
   }
 }
