@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
-  Search, Sparkles, Loader2, Database,
+  Search, Sparkles, Loader2, Database, FolderInput,
 } from 'lucide-react';
 import { DriveFile, FolderItem, SemanticSearchResult } from '../types';
 import { runHybridSearch } from '../lib/searchEngine';
@@ -27,6 +27,7 @@ const SAMPLE_PROMPTS = [
 export const SemanticSearch: React.FC<SemanticSearchProps> = ({
   files,
   onSelectFile,
+  onMoveFile,
   accessToken,
   onRequestToken,
 }) => {
@@ -198,9 +199,30 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
                 <div className="text-[11px] text-zinc-500 mt-0.5">{formatBytes(r.file.size)} · {r.relevanceReason}</div>
                 <p className="text-xs text-zinc-600 dark:text-zinc-400 mt-1 line-clamp-2">{r.matchedSnippet}</p>
               </div>
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-600 shrink-0">
-                {r.score > 0 ? `Match ${r.score}` : '—'}
-              </span>
+              <div className="flex flex-col items-end gap-1 shrink-0">
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-600">
+                  {r.score > 0 ? `Match ${r.score}` : '—'}
+                </span>
+                {onMoveFile && (
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    className="inline-flex items-center gap-0.5 text-[10px] font-bold text-indigo-600 hover:underline"
+                    onClick={e => {
+                      e.stopPropagation();
+                      onMoveFile(r.file);
+                    }}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') {
+                        e.stopPropagation();
+                        onMoveFile(r.file);
+                      }
+                    }}
+                  >
+                    <FolderInput className="w-3.5 h-3.5" /> Move
+                  </span>
+                )}
+              </div>
             </div>
           </button>
         ))}
