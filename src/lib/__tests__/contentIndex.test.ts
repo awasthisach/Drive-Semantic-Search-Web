@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { chunkText } from '../contentIndex';
+import { chunkText, tokenize } from '../contentIndex';
 
 describe('chunkText', () => {
   it('returns empty for blank', () => {
@@ -17,5 +17,15 @@ describe('chunkText', () => {
     const long = 'word '.repeat(500);
     const c = chunkText(long);
     expect(c.length).toBeGreaterThan(1);
+  });
+});
+
+describe('tokenize', () => {
+  it('lowercases and splits', () => {
+    expect(tokenize('Hello WORLD test')).toEqual(['hello', 'world', 'test']);
+  });
+
+  it('drops short tokens', () => {
+    expect(tokenize('a bb ccc')).toEqual(['bb', 'ccc']);
   });
 });
