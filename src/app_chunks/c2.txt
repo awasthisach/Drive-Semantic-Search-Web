@@ -1,0 +1,137 @@
+r(err);
+      showDriveToast('Upload failed: ' + (err?.message || 'error'));
+    } finally {
+      setIsGoogleLoading(false);
+    }
+  };
+
+  const handleConnectDemoDrive = () => {
+    setIsGoogleConnected(true);
+    setUserProfile(p => ({ ...p, name: 'Demo Drive', isConnected: true }));
+    setFiles(INITIAL_FILES);
+    setFolders(INITIAL_FOLDERS);
+    showDriveToast('Demo Google Drive Connected');
+  };
+
+  const handleGoogleSignIn = async () => {
+    try {
+      setIsGoogleLoading(true);
+      const result = await googleSignIn();
+      if (result) {
+        setGoogleAccessToken(result.accessToken);
+        setIsGoogleConnected(true);
+        try {
+          const drives = await listSharedDrives(result.accessToken);
+          setSharedDrives(drives);
+        } catch (e) {
+          console.warn('Shared drives list skipped:', e);
+          setSharedDrives([]);
+        }
+        setUserProfile({
+          name: result.user.displayName || 'Google Drive User',
+          email: result.user.email || '',
+          avatar: result.user.photoURL || '',
+          isConnected: true,
+        });
+        try {
+          const syncResult = await runDriveSync({
+            token: result.accessToken,
+            typeToUse: driveFileTypeFilter,
+            corpus: driveCorpus,
+            driveId: sharedDriveId || undefined,
+            currentFiles: files,
+            currentFolders: folders,
+          });
+          setDriveTruncated(syncResult.truncated);
+          setFiles(syncResult.files);
+          setFolders(syncResult.folders);
+          setSyncStats(s => ({
+            ...s,
+            status: 'synced',
+            totalSyncedCount: syncResult.files.filter(f => f.isGoogleDriveItem).length,
+            lastSynced: new Date().toISOString(),
+          }));
+          showDriveToast(syncResult.message);
+        } catch (e: any) {
+          showDriveToast('Connected but sync issue: ' + (e?.message || 'retry Sync Now'));
+        }
+      } else {
+        showDriveToast('Google Sign-In cancelled.');
+      }
+    } catch (err: any) {
+      const message = err?.message || 'Unable to connect to Google Drive';
+      if (message.includes('popup-closed') || message.includes('cancelled')) {
+        showDriveToast('Sign-In cancelled.');
+      } else {
+        setAuthErrorMessage(message);
+        setAuthErrorModalOpen(true);
+      }
+    } finally {
+      setIsGoogleLoading(false);
+    }
+  };
+
+  const handleGoogleSignOut = async () => {
+    try {
+      await googleSignOut({ revoke: true });
+      setIsGoogleConnected(false);
+      setGoogleAccessToken(null);
+      setDriveTruncated(false);
+      setSharedDrives([]);
+      setDriveCorpus('user');
+      setSharedDriveId('');
+      setUserProfile(p => ({ ...p, isConnected: false, email: '' }));
+      setFiles(INITIAL_FILES);
+      setFolders(INITIAL_FOLDERS);
+      showDriveToast('Signed out and revoked Drive access');
+    } catch (err) {
+      console.error('Sign-out error:', err);
+    }
+  };
+
+  const handleSyncGoogleDrive = async (
+    fileType?: DriveFileTypeFilter,
+    corpusOverride?: DriveCorpus,
+    driveIdOverride?: string
+  ) => {
+    let token = (await ensureValidToken()) || googleAccessToken || (await getAccessToken());
+    if (!token) {
+      handleGoogleSignIn();
+      return;
+    }
+    setGoogleAccessToken(token);
+    const typeToUse = fileType || driveFileTypeFilter;
+    const corpus = corpusOverride ?? driveCorpus;
+    const dId = driveIdOverride !== undefined ? driveIdOverride : sharedDriveId;
+
+    const runFetch = async (tok: string) => {
+      const result = await runDriveSync({
+        token: tok,
+        typeToUse,
+        corpus,
+        driveId: dId || undefined,
+        currentFiles: files,
+        currentFolders: folders,
+      });
+      setDriveTruncated(result.truncated);
+      setFiles(result.files);
+      setFolders(result.folders);
+      setSyncStats(s => ({
+        ...s,
+        status: 'synced',
+        totalSyncedCount: result.files.filter(f => f.isGoogleDriveItem).length,
+        lastSynced: new Date().toISOString(),
+      }));
+      showDriveToast(result.message);
+    };
+
+    try {
+      setIsGoogleLoading(true);
+      if (fileType) setDriveFileTypeFilter(fileType);
+      await runFetch(token);
+    } catch (err: any) {
+      const msg = err?.message || 'Error';
+      console.error('Sync failed:', msg);
+      if (String(msg).includes('401') || /invalid|auth|login|unauth/i.test(String(msg))) {
+        const refreshed = await ensureValidToken();
+        if (refreshed)
