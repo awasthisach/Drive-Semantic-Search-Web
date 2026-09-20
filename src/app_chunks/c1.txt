@@ -1,0 +1,130 @@
+celled = false;
+    (async () => {
+      try {
+        const stored = await loadVaultFiles();
+        if (!cancelled && stored.length) setVaultFiles(stored);
+      } catch (e) {
+        console.warn('Vault restore skipped:', e);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const snap = await loadDriveMetaSnapshot();
+        if (cancelled || !snap || !snap.files?.length) return;
+        setFiles(prev => {
+          const driveIds = new Set(snap.files.map(f => f.id));
+          const localOnly = prev.filter(f => !f.isGoogleDriveItem && !driveIds.has(f.id));
+          return [...snap.files, ...localOnly];
+        });
+        if (snap.folders?.length) setFolders(snap.folders);
+        if (snap.truncated) setDriveTruncated(true);
+        setSyncStats(s => ({
+          ...s,
+          totalSyncedCount: snap.files.length,
+          lastSynced: snap.savedAt,
+        }));
+      } catch (e) {
+        console.warn('Drive meta restore skipped:', e);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const metas = await listOfflineMeta();
+        if (cancelled || !metas.length) return;
+        const offlineIds = new Set(metas.map(m => m.id));
+        const hashById = new Map(metas.filter(m => m.sha256).map(m => [m.id, 'sha256:' + m.sha256!]));
+        setFiles(prev => prev.map(f => {
+          if (!offlineIds.has(f.id)) return f;
+          return { ...f, isOffline: true, contentHash: hashById.get(f.id) || f.contentHash };
+        }));
+      } catch (e) {
+        console.warn('Offline restore skipped:', e);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [isGoogleConnected, files.length]);
+
+  useEffect(() => {
+    const unsubscribe = initAuth(
+      async (user, token) => {
+        setIsGoogleConnected(true);
+        setGoogleAccessToken(token);
+        setUserProfile({
+          name: user.displayName || 'Google Drive User',
+          email: user.email || '',
+          avatar: user.photoURL || '',
+          isConnected: true,
+        });
+        try {
+          setIsGoogleLoading(true);
+          try {
+            const drives = await listSharedDrives(token);
+            setSharedDrives(drives);
+          } catch (e) {
+            console.warn('Shared drives list skipped:', e);
+            setSharedDrives([]);
+          }
+          const savedCorpus = (sessionStorage.getItem('drive_corpus') as DriveCorpus) || 'user';
+          const savedDriveId = sessionStorage.getItem('drive_shared_id') || undefined;
+          setDriveCorpus(savedCorpus);
+          if (savedDriveId) setSharedDriveId(savedDriveId);
+          const result = await runDriveSync({
+            token,
+            typeToUse: 'all',
+            corpus: savedCorpus === 'drive' && savedDriveId ? 'drive' : savedCorpus === 'allDrives' ? 'allDrives' : 'user',
+            driveId: savedDriveId,
+            currentFiles: files,
+            currentFolders: folders,
+          });
+          setDriveTruncated(result.truncated);
+          setFiles(result.files);
+          setFolders(result.folders);
+          setSyncStats(s => ({
+            ...s,
+            status: 'synced',
+            totalSyncedCount: result.files.filter(f => f.isGoogleDriveItem).length,
+            lastSynced: new Date().toISOString(),
+          }));
+        } catch (err) {
+          console.warn('Silent Google Drive initial sync skipped:', err);
+        } finally {
+          setIsGoogleLoading(false);
+        }
+      },
+      () => {
+        setIsGoogleConnected(false);
+        setGoogleAccessToken(null);
+      }
+    );
+    return () => unsubscribe();
+  }, []);
+
+  const handleUploadFile = (newFile: DriveFile) => setFiles(prev => [newFile, ...prev]);
+
+  const handleUploadToDrive = async (file: File) => {
+    try {
+      setIsGoogleLoading(true);
+      const uploaded = await withDriveAuthRetry(
+        async () => (await ensureValidToken()) || googleAccessToken || (await getAccessToken()),
+        tok => setGoogleAccessToken(tok),
+        tok => uploadGoogleDriveFile(tok, file)
+      );
+      setFiles(prev => [uploaded, ...prev]);
+      setSyncStats(s => ({
+        ...s,
+        totalSyncedCount: s.totalSyncedCount + 1,
+        lastSynced: new Date().toISOString(),
+      }));
+      showDriveToast('Uploaded to Drive: "' + uploaded.name + '"');
+    } catch (err: any) {
+      console.erro
