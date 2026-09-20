@@ -23,6 +23,15 @@ export interface IndexedDocument {
   source: 'export' | 'binary-text' | 'offline-blob';
   driveModifiedTime?: string;
   textTruncated?: boolean;
+  /** My Drive / Shared Drive scope — pruning is scoped to this key */
+  corpusKey?: string;
+}
+
+/** Stable key matching driveMetaStore snapshot keys. */
+export function makeCorpusKey(corpus: string, sharedDriveId?: string): string {
+  if (corpus === 'drive' && sharedDriveId) return 'drive:' + sharedDriveId;
+  if (corpus === 'allDrives') return 'allDrives';
+  return 'user';
 }
 
 export interface IndexedChunk {
@@ -139,6 +148,7 @@ export async function putIndexedDocument(
     source: doc.source,
     driveModifiedTime: doc.driveModifiedTime,
     textTruncated: truncated,
+    corpusKey: doc.corpusKey,
   };
   const postings = buildPostings(doc.id, chunks);
 
@@ -191,14 +201,52 @@ export async function removeIndexedDocument(id: string): Promise<void> {
   }
 }
 
-export async function pruneMissingFromIndex(liveFileIds: Set<string>): Promise<number> {
+export type PruneOptions = {
+  liveFileIds: Set<string>;
+  /** Only prune docs that belong to this corpus (or legacy docs with no corpusKey when matching user). */
+  corpusKey?: string;
+  /**
+   * When false (truncated list / filtered type sync), do nothing.
+   * Incomplete enumerations must never delete index rows.
+   */
+  complete: boolean;
+};
+
+/**
+ * Remove content-index docs whose file id is not in the live set.
+ * SAFETY: only runs when complete === true (full non-truncated enumeration).
+ * When corpusKey is set, only docs for that corpus are considered.
+ */
+export async function pruneMissingFromIndex(opts: PruneOptions | Set<string>): Promise<number> {
+  // Back-compat: bare Set was unsafe; treat as incomplete (no-op) unless complete is explicit.
+  if (opts instanceof Set) {
+    console.warn('[contentIndex] pruneMissingFromIndex called without { complete } — refusing to prune');
+    return 0;
+  }
+  if (!opts.complete) return 0;
+
   const docs = await listIndexedDocuments();
   let removed = 0;
   for (const d of docs) {
-    if (!liveFileIds.has(d.id)) {
+    if (opts.corpusKey) {
+      // Skip docs from other corpora; legacy (no corpusKey) only match when pruning user corpus
+      if (d.corpusKey && d.corpusKey !== opts.corpusKey) continue;
+      if (!d.corpusKey && opts.corpusKey !== 'user') continue;
+    }
+    if (!opts.liveFileIds.has(d.id)) {
       await removeIndexedDocument(d.id);
       removed++;
     }
+  }
+  return removed;
+}
+
+/** Targeted removal for Changes API deleted/trashed file ids (safe even when baseline incomplete). */
+export async function removeIndexedDocumentsByIds(ids: string[]): Promise<number> {
+  let removed = 0;
+  for (const id of ids) {
+    await removeIndexedDocument(id);
+    removed++;
   }
   return removed;
 }
