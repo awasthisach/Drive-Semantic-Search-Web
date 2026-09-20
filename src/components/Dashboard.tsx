@@ -255,7 +255,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
           </>
         )}
         {selectedFilesList.length === 0 && (
-          <span className="text-zinc-500">Tip: checkbox select + <strong>Move to folder</strong>, ya card pe <strong>Move</strong></span>
+          <span className="text-zinc-500">Tip: select checkboxes then use <strong>Move to folder</strong>, or card <strong>Move</strong></span>
         )}
       </div>
 
