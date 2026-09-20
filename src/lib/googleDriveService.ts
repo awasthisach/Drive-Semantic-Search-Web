@@ -76,6 +76,23 @@ export async function fetchGoogleDriveData(
   corpus: DriveCorpus = 'user',
   driveId?: string
 ): Promise<DriveFetchResult> {
+  if (!accessToken || typeof accessToken !== 'string') {
+    throw new Error('fetchGoogleDriveData: accessToken is required');
+  }
+  const allowedTypes: DriveFileTypeFilter[] = ['all', 'documents', 'images', 'videos', 'spreadsheets', 'pdfs', 'folders'];
+  if (!allowedTypes.includes(fileType)) {
+    throw new Error('fetchGoogleDriveData: invalid fileType');
+  }
+  if (!Number.isFinite(maxPages) || maxPages < 1 || maxPages > 100) {
+    throw new Error('fetchGoogleDriveData: maxPages must be 1–100');
+  }
+  const allowedCorpus: DriveCorpus[] = ['user', 'allDrives', 'drive'];
+  if (!allowedCorpus.includes(corpus)) {
+    throw new Error('fetchGoogleDriveData: invalid corpus');
+  }
+  if (corpus === 'drive' && !driveId) {
+    throw new Error('fetchGoogleDriveData: driveId required when corpus is drive');
+  }
   const fields = 'files(id,name,mimeType,size,modifiedTime,createdTime,thumbnailLink,webViewLink,iconLink,parents,trashed,description,starred),nextPageToken';
   const query = buildDriveQuery(fileType);
   const rawItems: any[] = [];
