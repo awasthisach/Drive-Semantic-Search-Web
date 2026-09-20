@@ -8,39 +8,34 @@ Client-side web app: Google Drive sync, hybrid content search, offline pin, vaul
 
 - **Google Drive** — OAuth, My Drive / All drives / Shared Drive, type filters, upload, trash, move, folders, star
 - **Token lifecycle** — expiry, silent refresh, revoke on sign-out
-- **Auth retry** — `withDriveAuthRetry` on upload, star, move, trash, and hash verify (one refresh + retry on 401)
-- **Offline pin** — binary or native export → IndexedDB (**true LRU**, 200MB / 80 entries) + SHA-256; preview from cache
-- **Vault** — PBKDF2 310k + AES-GCM (Worker + main-thread fallback), IndexedDB ciphertext
-- **Duplicates** — size+name **candidates** (unknown size excluded); **trash locked** until SHA-256 verify
-- **Search** — **hybrid**: metadata keywords + extracted body (BM25-style). Index Docs/Sheets/text first. Not neural embeddings
-- **Content index** — durable IndexedDB body index; stores `driveModifiedTime` for **stale detection**; re-index skips fresh files; orphans pruned on sync/delete; bodies capped at **500k characters**
-- **Durable meta** — Drive list snapshot per corpus (`user` / `allDrives` / `drive:<id>`) in IndexedDB; restored after refresh
-- **Move** — Dashboard card, bulk select, Search results, File preview
+- **Auth retry** — `withDriveAuthRetry` on upload, star, move, trash, and hash verify
+- **Incremental sync** — Drive **Changes API**; first full list seeds page token; later Sync Now is delta (when type filter = all)
+- **Offline pin** — binary or native export → IndexedDB (**true LRU**, 200MB / 80 entries) + SHA-256
+- **Vault** — PBKDF2 310k + AES-GCM (Worker + main-thread fallback)
+- **Duplicates** — size+name candidates; trash locked until SHA-256 verify
+- **Search** — hybrid metadata + **inverted postings** (FTS-style BM25). Re-index builds term→file map. Not neural embeddings
+- **Content index** — IndexedDB docs/chunks/postings; stale detection via `driveModifiedTime`; 500k body cap
+- **Durable meta** — Drive list snapshot + changes page token per corpus
+- **Move** — Dashboard, bulk, Search, Preview
 - **PWA** — Vite PWA shell
 
 ## Package manager
 
-**npm only** (`packageManager: npm@10`). Vitest **5.x**. CI: install → lint → test → build → GitHub Pages.
+**npm only**. CI: install → lint → test → build → GitHub Pages.
 
 ## Scripts
 
-- `npm run dev` — local
-- `npm run lint` — `tsc --noEmit`
-- `npm test` — vitest unit tests
-- `npm run build` — production
+- `npm run dev` / `npm run lint` / `npm test` / `npm run build`
 
 ## Honest limits
 
-- Not neural/vector embeddings (hybrid lexical on extracted text)
-- PDF binary OCR not included (Google Docs/Sheets/text extract work)
-- Content index is not fully automatic — use **Index extractable content**; it skips already-fresh files via `modifiedTime`
-- Broad `drive` OAuth scope (list + mutate)
-- Access token in `sessionStorage` (SPA constraint; see SECURITY.md)
-- Vault unlock is passphrase-based client-side only
+- Not neural/vector embeddings
+- PDF binary OCR not included
+- Filtered type syncs still full-list; incremental applies for type=**all**
+- Broad `drive` OAuth scope; token in `sessionStorage` (see SECURITY.md)
 - Pagination capped (~20k) with truncation banner
-- Missing Drive API size → shown as **Size unknown** (never invented as 1024)
-- Large-scale search still scans IndexedDB chunks (no inverted index yet)
+- Missing size → **Size unknown** (never invented as 1024)
 
 ## Stack
 
-React 19, Vite 6, Tailwind 4, Firebase Auth + GIS, Drive API v3, IndexedDB, Web Crypto + Worker, Vitest 5.
+React 19, Vite 6, Tailwind 4, Firebase Auth + GIS, Drive API v3, IndexedDB inverted postings, Web Crypto, Vitest 5.
