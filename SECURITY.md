@@ -50,7 +50,7 @@ This app is a static SPA on GitHub Pages, so tokens must live in the page contex
 
 1. **Sign out when done** — clears `sessionStorage` token and attempts revoke.
 2. **Prefer trusted devices** — any XSS on this origin can read the active access token.
-3. **CSP (hosting layer)** — if you put a reverse proxy or custom domain in front, set a strict Content-Security-Policy (default-src, script-src, connect-src limited to Google APIs and your origin).
+3. **CSP** — `index.html` ships a **meta Content-Security-Policy** (allows Google/Firebase OAuth + Drive API). For stronger enforcement, also set CSP **HTTP headers** on a reverse proxy / custom domain (`frame-ancestors` is ignored in meta CSP on some browsers).
 4. **Do not embed this app in untrusted iframes** — use `frame-ancestors 'none'` when possible.
 5. **Broad Drive scope** is required for trash/move/upload/star in-browser; a read-only mode would need a separate OAuth client and reduced feature set.
 

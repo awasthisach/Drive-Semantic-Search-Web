@@ -30,7 +30,13 @@ export class ErrorBoundary extends React.Component<
   }
 
   componentDidCatch(error: Error, info: React.ErrorInfo): void {
-    console.error('App error boundary:', error, info.componentStack);
+    console.error(JSON.stringify({
+      source: 'error_boundary',
+      message: error?.message,
+      stack: error?.stack?.slice?.(0, 500),
+      componentStack: info?.componentStack?.slice?.(0, 500),
+      ts: new Date().toISOString(),
+    }));
   }
 
   private handleReload = (): void => {

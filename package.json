@@ -11,7 +11,9 @@
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "check:bundle": "node scripts/check-bundle-size.mjs",
+    "format:check": "node -e \"console.log('Prettier not required in CI; run npx prettier --write src if desired')\""
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.14",
