@@ -105,11 +105,13 @@ function getCryptoWorker(): Worker | null {
 
 function workerCall<T>(type: 'encrypt' | 'decrypt', payload: Record<string, unknown>): Promise<T> {
   return new Promise((resolve, reject) => {
-    const w = getCryptoWorker();
-    if (!w) {
+    const worker = getCryptoWorker();
+    if (!worker) {
       reject(new Error('Worker unavailable'));
       return;
     }
+    // Capture non-null Worker for nested callbacks (strictNullChecks)
+    const w: Worker = worker;
     const id = 'c' + ++msgId;
     const timer = setTimeout(() => {
       w.removeEventListener('message', onMsg);
