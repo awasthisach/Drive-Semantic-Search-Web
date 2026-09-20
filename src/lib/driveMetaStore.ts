@@ -1,12 +1,14 @@
 /**
  * Durable Drive metadata snapshot in IndexedDB (survives refresh).
  * Keys are per-corpus so My Drive / Shared Drive caches do not overwrite each other.
+ * Also stores Changes API page tokens for incremental sync.
  */
 import type { DriveFile, FolderItem } from '../types';
 
 const DB_NAME = 'drive-semantic-meta';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE = 'snapshot';
+const TOKEN_STORE = 'pageTokens';
 
 export interface DriveMetaSnapshot {
   key: string;
@@ -24,6 +26,10 @@ function snapshotKey(corpus: string, sharedDriveId?: string): string {
   return 'user';
 }
 
+function tokenKey(corpus: string, sharedDriveId?: string): string {
+  return 'changes:' + snapshotKey(corpus, sharedDriveId);
+}
+
 function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     if (typeof indexedDB === 'undefined') {
@@ -37,6 +43,9 @@ function openDb(): Promise<IDBDatabase> {
       const db = req.result;
       if (!db.objectStoreNames.contains(STORE)) {
         db.createObjectStore(STORE, { keyPath: 'key' });
+      }
+      if (!db.objectStoreNames.contains(TOKEN_STORE)) {
+        db.createObjectStore(TOKEN_STORE, { keyPath: 'key' });
       }
     };
   });
@@ -60,7 +69,6 @@ export async function saveDriveMetaSnapshot(
   };
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE, 'readwrite');
-    // Also keep a 'latest' pointer for cold start before corpus is known
     tx.objectStore(STORE).put(snap);
     tx.objectStore(STORE).put({ ...snap, key: 'latest' });
     tx.oncomplete = () => resolve();
@@ -84,7 +92,6 @@ export async function loadDriveMetaSnapshot(
           resolve(req.result);
           return;
         }
-        // Fallback to legacy single key
         const legacy = tx.objectStore(STORE).get('latest');
         legacy.onsuccess = () => resolve(legacy.result || null);
         legacy.onerror = () => resolve(null);
@@ -94,5 +101,59 @@ export async function loadDriveMetaSnapshot(
   } catch (e) {
     console.warn('[driveMetaStore] load failed', e);
     return null;
+  }
+}
+
+export async function saveChangesPageToken(
+  corpus: string,
+  sharedDriveId: string | undefined,
+  pageToken: string
+): Promise<void> {
+  const db = await openDb();
+  if (!db.objectStoreNames.contains(TOKEN_STORE)) return;
+  const key = tokenKey(corpus, sharedDriveId);
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(TOKEN_STORE, 'readwrite');
+    tx.objectStore(TOKEN_STORE).put({ key, pageToken, savedAt: new Date().toISOString() });
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+export async function loadChangesPageToken(
+  corpus: string,
+  sharedDriveId?: string
+): Promise<string | null> {
+  try {
+    const db = await openDb();
+    if (!db.objectStoreNames.contains(TOKEN_STORE)) return null;
+    const key = tokenKey(corpus, sharedDriveId);
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(TOKEN_STORE, 'readonly');
+      const req = tx.objectStore(TOKEN_STORE).get(key);
+      req.onsuccess = () => resolve(req.result?.pageToken || null);
+      req.onerror = () => reject(req.error);
+    });
+  } catch {
+    return null;
+  }
+}
+
+export async function clearChangesPageToken(
+  corpus: string,
+  sharedDriveId?: string
+): Promise<void> {
+  try {
+    const db = await openDb();
+    if (!db.objectStoreNames.contains(TOKEN_STORE)) return;
+    const key = tokenKey(corpus, sharedDriveId);
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(TOKEN_STORE, 'readwrite');
+      tx.objectStore(TOKEN_STORE).delete(key);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch {
+    /* ignore */
   }
 }
