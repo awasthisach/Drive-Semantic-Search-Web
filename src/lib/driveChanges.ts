@@ -184,17 +184,21 @@ export function applyDriveChanges(
   files: DriveFile[],
   folders: FolderItem[],
   changes: DriveChangeItem[]
-): { files: DriveFile[]; folders: FolderItem[]; added: number; updated: number; removed: number } {
+): { files: DriveFile[]; folders: FolderItem[]; added: number; updated: number; removed: number; removedIds: string[] } {
   const fileMap = new Map(files.filter(f => f.isGoogleDriveItem).map(f => [f.id, f]));
   const localOnly = files.filter(f => !f.isGoogleDriveItem);
   const folderMap = new Map(folders.map(f => [f.id, f]));
   let added = 0;
   let updated = 0;
   let removed = 0;
+  const removedIds: string[] = [];
 
   for (const ch of changes) {
     if (ch.removed || ch.file?.trashed) {
-      if (fileMap.delete(ch.fileId)) removed++;
+      if (fileMap.delete(ch.fileId)) {
+        removed++;
+        removedIds.push(ch.fileId);
+      }
       if (folderMap.delete(ch.fileId)) removed++;
       continue;
     }
@@ -228,5 +232,6 @@ export function applyDriveChanges(
     added,
     updated,
     removed,
+    removedIds,
   };
 }
