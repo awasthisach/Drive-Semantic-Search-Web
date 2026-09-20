@@ -30,6 +30,7 @@ import {
 import { withDriveAuthRetry } from './lib/driveAuth';
 import { verifyFilesHashQueue } from './lib/hashVerifier';
 import { saveDriveMetaSnapshot, loadDriveMetaSnapshot } from './lib/driveMetaStore';
+import { removeIndexedDocument, pruneMissingFromIndex } from './lib/contentIndex';
 
 const DeviceStorageScanner = React.lazy(() =>
   import('./components/DeviceStorageScanner').then(m => ({ default: m.DeviceStorageScanner }))
@@ -219,15 +220,13 @@ export default function App() {
   const handleUploadFile = (newFile: DriveFile) => setFiles(prev => [newFile, ...prev]);
 
   const handleUploadToDrive = async (file: File) => {
-    const token = (await ensureValidToken()) || googleAccessToken || (await getAccessToken());
-    if (!token) {
-      showDriveToast('Sign in required to upload to Google Drive');
-      return;
-    }
-    setGoogleAccessToken(token);
     try {
       setIsGoogleLoading(true);
-      const uploaded = await uploadGoogleDriveFile(token, file);
+      const uploaded = await withDriveAuthRetry(
+        async () => (await ensureValidToken()) || googleAccessToken || (await getAccessToken()),
+        tok => setGoogleAccessToken(tok),
+        tok => uploadGoogleDriveFile(tok, file)
+      );
       setFiles(prev => [uploaded, ...prev]);
       setSyncStats(s => ({
         ...s,
@@ -374,6 +373,11 @@ export default function App() {
       } catch (e) {
         console.warn('Drive meta persist failed', e);
       }
+      try {
+        await pruneMissingFromIndex(new Set(driveData.files.map(f => f.id)));
+      } catch (e) {
+        console.warn('Content index prune failed', e);
+      }
       const truncMsg = driveData.truncated ? ' (list capped — more files on Drive)' : '';
       showDriveToast('Synced (' + typeToUse + '): ' + driveData.files.length + ' files' + truncMsg);
     };
@@ -419,6 +423,7 @@ export default function App() {
           tok => deleteGoogleDriveFile(tok, id)
         );
         setFiles(prev => prev.filter(f => f.id !== id));
+        void removeIndexedDocument(id);
         showDriveToast('Moved to Drive trash: "' + fileToDelete.name + '"');
       } catch (err: any) {
         console.error(err);
@@ -426,6 +431,7 @@ export default function App() {
       }
     } else {
       setFiles(prev => prev.filter(f => f.id !== id));
+      void removeIndexedDocument(id);
     }
   };
 
@@ -437,6 +443,7 @@ export default function App() {
     if (localOnly.length) {
       const localIds = new Set(localOnly.map(f => f.id));
       setFiles(prev => prev.filter(f => !localIds.has(f.id)));
+      for (const lid of localIds) void removeIndexedDocument(lid);
     }
     if (driveItems.length === 0) return;
     const succeeded: string[] = [];
@@ -457,6 +464,7 @@ export default function App() {
     if (succeeded.length) {
       const ok = new Set(succeeded);
       setFiles(prev => prev.filter(f => !ok.has(f.id)));
+      for (const sid of succeeded) void removeIndexedDocument(sid);
     }
     if (failed.length) {
       showDriveToast('Delete partial: ' + failed.length + ' failed');
@@ -483,28 +491,18 @@ export default function App() {
 
   const handleMoveFilesToFolder = async (fileIds: string[], targetFolderId: string | undefined) => {
     const idSet = new Set(fileIds);
-    const snapshot = files.filter(f => idSet.has(f.id));
-    const localIds = new Set(snapshot.filter(f => !f.isGoogleDriveItem).map(f => f.id));
-    if (localIds.size) {
-      setFiles(prev => prev.map(f => (localIds.has(f.id) ? { ...f, folderId: targetFolderId } : f)));
-    }
-    const driveItems = snapshot.filter(f => f.isGoogleDriveItem);
-    if (!driveItems.length) {
-      showDriveToast(localIds.size ? 'Local files updated' : 'Nothing to move');
-      return;
-    }
-    const token = (await ensureValidToken()) || googleAccessToken || (await getAccessToken());
-    if (!token) {
-      showDriveToast('Sign in required to move Drive files');
-      return;
-    }
+    const toMove = files.filter(f => idSet.has(f.id));
     const succeeded: string[] = [];
-    for (const f of driveItems) {
+    for (const f of toMove) {
+      if (!f.isGoogleDriveItem) {
+        succeeded.push(f.id);
+        continue;
+      }
       try {
         await withDriveAuthRetry(
           async () => (await ensureValidToken()) || googleAccessToken || (await getAccessToken()),
           t => setGoogleAccessToken(t),
-          tok => moveGoogleDriveFile(tok, f.id, targetFolderId || 'root')
+          tok => moveGoogleDriveFile(tok, f.id, targetFolderId)
         );
         succeeded.push(f.id);
       } catch (err: any) {
@@ -525,14 +523,12 @@ export default function App() {
     const next = !file.starred;
     setFiles(prev => prev.map(f => (f.id === id ? { ...f, starred: next } : f)));
     if (file.isGoogleDriveItem) {
-      const token = (await ensureValidToken()) || googleAccessToken || (await getAccessToken());
-      if (!token) {
-        setFiles(prev => prev.map(f => (f.id === id ? { ...f, starred: file.starred } : f)));
-        showDriveToast('Sign in required to star on Drive');
-        return;
-      }
       try {
-        await starGoogleDriveFile(token, id, next);
+        await withDriveAuthRetry(
+          async () => (await ensureValidToken()) || googleAccessToken || (await getAccessToken()),
+          tok => setGoogleAccessToken(tok),
+          tok => starGoogleDriveFile(tok, id, next)
+        );
       } catch (err: any) {
         setFiles(prev => prev.map(f => (f.id === id ? { ...f, starred: file.starred } : f)));
         showDriveToast('Star failed: ' + (err?.message || 'error'));
@@ -547,78 +543,80 @@ export default function App() {
       try {
         await removeOfflineBlob(id);
         setFiles(prev => prev.map(f => (f.id === id ? { ...f, isOffline: false } : f)));
-        showDriveToast('Unpinned from offline cache');
-      } catch (e: any) {
-        showDriveToast('Unpin failed — still marked offline: ' + (e?.message || 'error'));
+        showDriveToast('Removed offline pin: ' + file.name);
+      } catch (e) {
+        console.warn(e);
+        showDriveToast('Unpin failed');
       }
       return;
     }
-    if (file.isGoogleDriveItem) {
-      const token = (await ensureValidToken()) || googleAccessToken || (await getAccessToken());
-      if (!token) {
-        showDriveToast('Sign in required to cache Drive files offline');
+    const token = (await ensureValidToken()) || googleAccessToken || (await getAccessToken());
+    if (!token && file.isGoogleDriveItem) {
+      showDriveToast('Sign in required to pin Drive file offline');
+      return;
+    }
+    try {
+      let blob: Blob;
+      let downloadName: string | undefined;
+      if (file.isGoogleDriveItem && token) {
+        const res = await downloadDriveFileBytes(token, file.id, file.mimeType, file.name);
+        blob = res.blob;
+        downloadName = res.downloadName;
+      } else {
+        showDriveToast('Cannot pin: no local bytes available');
         return;
       }
-      try {
-        setIsGoogleLoading(true);
-        const { blob, downloadName } = await downloadDriveFileBytes(token, file.id, file.mimeType);
-        let sha: string | undefined;
-        try { sha = await sha256Blob(blob); } catch { /* optional */ }
-        const storeName = downloadName ? file.name.replace(/\.[^.]+$/, '') + downloadName : file.name;
-        const isExport = Boolean(downloadName) || (file.mimeType || '').startsWith('application/vnd.google-apps.');
-        const { evictedIds } = await putOfflineBlob(id, blob, {
-          name: storeName,
-          mimeType: blob.type || file.mimeType,
-          size: blob.size || file.size,
-          sha256: sha,
-        });
-        const offlineMeta = await listOfflineMeta();
-        const offlineIds = new Set(offlineMeta.map(m => m.id));
-        const hashById = new Map(offlineMeta.filter(m => m.sha256).map(m => [m.id, 'sha256:' + m.sha256!]));
-        setFiles(prev => prev.map(f => {
-          if (f.id === id) {
-            return { ...f, isOffline: true, contentHash: sha ? ('sha256:' + sha) : f.contentHash, size: blob.size || f.size };
+      const hash = await sha256Blob(blob);
+      const isExport = Boolean(downloadName) || (file.mimeType || '').startsWith('application/vnd.google-apps.');
+      const result = await putOfflineBlob({
+        id: file.id,
+        name: downloadName || file.name,
+        mimeType: blob.type || file.mimeType,
+        size: blob.size,
+        blob,
+        sha256: hash,
+      });
+      const offlineIds = new Set((await listOfflineMeta()).map(m => m.id));
+      setFiles(prev =>
+        prev.map(f => {
+          if (f.id === file.id) {
+            return { ...f, isOffline: true, contentHash: 'sha256:' + hash, size: blob.size || f.size };
           }
-          if (evictedIds.includes(f.id) || (f.isOffline && !offlineIds.has(f.id))) {
+          if (f.isOffline && !offlineIds.has(f.id)) {
             return { ...f, isOffline: false };
           }
-          if (offlineIds.has(f.id) && hashById.has(f.id)) {
-            return { ...f, isOffline: true, contentHash: hashById.get(f.id) || f.contentHash };
-          }
           return f;
-        }));
-        const hashLabel = sha ? (isExport ? ' (SHA-256 of offline export)' : ' (SHA-256)') : '';
-        const evictMsg = evictedIds.length ? ' · Evicted ' + evictedIds.length + ' older pin(s)' : '';
-        showDriveToast('Pinned offline: "' + storeName + '"' + hashLabel + evictMsg);
-      } catch (err: any) {
-        console.error(err);
-        showDriveToast('Offline pin failed: ' + (err?.message || 'error'));
-      } finally {
-        setIsGoogleLoading(false);
+        })
+      );
+      if (result?.evictedIds?.length) {
+        showDriveToast('Pinned offline (evicted ' + result.evictedIds.length + ' older cache entries)');
+      } else {
+        showDriveToast('Pinned offline: ' + file.name);
       }
-      return;
+    } catch (err: any) {
+      console.error(err);
+      showDriveToast('Offline pin failed: ' + (err?.message || 'error'));
     }
-    setFiles(prev => prev.map(f => (f.id === id ? { ...f, isOffline: true } : f)));
-    showDriveToast('Marked offline (local index only)');
   };
 
   const handleVerifyHashes = async (fileIds: string[]) => {
-    const token = (await ensureValidToken()) || googleAccessToken || (await getAccessToken());
-    if (!token) {
-      showDriveToast('Sign in required to verify file hashes');
-      return;
-    }
-    setGoogleAccessToken(token);
     const targets = files.filter(f => fileIds.includes(f.id) && f.isGoogleDriveItem);
     if (!targets.length) return;
     setVerifyBusy(true);
     showDriveToast('Verifying SHA-256 for ' + targets.length + ' file(s)…');
     try {
-      const { ok, failed } = await verifyFilesHashQueue(token, targets, {
-        onHashed: (id, contentHash, size) => {
-          setFiles(prev => prev.map(f => (f.id === id ? { ...f, contentHash, size: size || f.size } : f)));
-        },
-      });
+      const { ok, failed } = await withDriveAuthRetry(
+        async () => (await ensureValidToken()) || googleAccessToken || (await getAccessToken()),
+        tok => setGoogleAccessToken(tok),
+        tok =>
+          verifyFilesHashQueue(tok, targets, {
+            onHashed: (id, contentHash, size) => {
+              setFiles(prev =>
+                prev.map(f => (f.id === id ? { ...f, contentHash, size: size || f.size } : f))
+              );
+            },
+          })
+      );
       showDriveToast('Hash verify done: ' + ok + ' ok, ' + failed + ' failed');
     } catch (e: any) {
       showDriveToast('Hash verify error: ' + (e?.message || 'error'));
@@ -627,17 +625,20 @@ export default function App() {
     }
   };
 
-  const handleAddVaultFile = async (file: VaultFile) => {
-    setVaultFiles(prev => [file, ...prev]);
-    try { await saveVaultFile(file); } catch (e) {
-      console.warn('Vault persist failed:', e);
-      showDriveToast('Note encrypted but IndexedDB save failed');
+  const handleAddVaultFile = async (vf: VaultFile) => {
+    try {
+      await saveVaultFile(vf);
+      setVaultFiles(prev => [vf, ...prev.filter(x => x.id !== vf.id)]);
+    } catch (e) {
+      console.warn('Vault save failed:', e);
     }
   };
 
   const handleDeleteVaultFile = async (id: string) => {
-    setVaultFiles(prev => prev.filter(f => f.id !== id));
-    try { await removeVaultFile(id); } catch (e) {
+    try {
+      await removeVaultFile(id);
+      setVaultFiles(prev => prev.filter(v => v.id !== id));
+    } catch (e) {
       console.warn('Vault remove failed:', e);
     }
   };
@@ -678,8 +679,9 @@ export default function App() {
             googleUserEmail={userProfile.email}
             onConnectGoogleDrive={handleGoogleSignIn} onConnectDemoDrive={handleConnectDemoDrive}
             onSyncGoogleDrive={handleSyncGoogleDrive}
-            driveTruncated={driveTruncated}
             driveFileTypeFilter={driveFileTypeFilter}
+            onDriveFileTypeChange={t => { setDriveFileTypeFilter(t); handleSyncGoogleDrive(t); }}
+            driveTruncated={driveTruncated}
             driveCorpus={driveCorpus}
             sharedDriveId={sharedDriveId}
             sharedDrives={sharedDrives}
@@ -690,10 +692,9 @@ export default function App() {
                 sessionStorage.setItem('drive_corpus', c);
                 if (id) sessionStorage.setItem('drive_shared_id', id);
                 else sessionStorage.removeItem('drive_shared_id');
-              } catch { /* ignore */ }
-              handleSyncGoogleDrive(driveFileTypeFilter, c, id || '');
+              } catch {}
+              handleSyncGoogleDrive(undefined, c, id);
             }}
-            onDriveFileTypeChange={t => { setDriveFileTypeFilter(t); handleSyncGoogleDrive(t); }}
           />
         )}
         {activeTab === 'search' && (
@@ -725,7 +726,7 @@ export default function App() {
         )}
         {activeTab === 'storage_scanner' && (
           <React.Suspense fallback={<TabLoadingFallback />}>
-            <DeviceStorageScanner onImportToDrive={handleUploadFile} onImportToVault={handleAddVaultFile} onSelectPreviewFile={setPreviewFile} />
+            <DeviceStorageScanner />
           </React.Suspense>
         )}
         {activeTab === 'offline' && (
@@ -735,39 +736,42 @@ export default function App() {
         )}
       </main>
 
-      <OfflineIndicator />
-      <AuthErrorModal isOpen={authErrorModalOpen} onClose={() => setAuthErrorModalOpen(false)}
-        errorMessage={authErrorMessage} onConnectDemoDrive={handleConnectDemoDrive}
-        onRetrySignIn={handleGoogleSignIn} isLoading={isGoogleLoading} />
+      <OfflineIndicator online={syncStats.networkOnline} />
 
       {driveNotification && (
-        <div className="fixed bottom-6 right-6 z-[99999] flex items-center gap-2.5 px-4 py-3 rounded-2xl bg-zinc-900 text-zinc-100 shadow-2xl text-xs font-semibold">
+        <div className="fixed bottom-4 right-4 z-50 flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-zinc-900 text-zinc-100 shadow-2xl text-xs font-semibold max-w-sm">
           <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
           <span>{driveNotification}</span>
-          <button type="button" onClick={() => setDriveNotification(null)} className="ml-2 text-zinc-400"><X className="w-3.5 h-3.5" /></button>
+          <button type="button" onClick={() => setDriveNotification(null)}><X className="w-3.5 h-3.5" /></button>
         </div>
       )}
+
+      <AuthErrorModal
+        isOpen={authErrorModalOpen}
+        message={authErrorMessage}
+        onClose={() => setAuthErrorModalOpen(false)}
+        onRetry={() => { setAuthErrorModalOpen(false); handleGoogleSignIn(); }}
+      />
+
       {previewFile && (
         <React.Suspense fallback={null}>
           <FilePreviewModal
             file={previewFile}
             onClose={() => setPreviewFile(null)}
-            onToggleOffline={handleToggleOffline}
-            onMove={f => {
-              setPreviewFile(null);
-              setSearchMoveTargetFile(f);
-            }}
+            onToggleOffline={() => handleToggleOffline(previewFile.id)}
+            onMove={() => { setSearchMoveTargetFile(previewFile); setPreviewFile(null); }}
           />
         </React.Suspense>
       )}
+
       {searchMoveTargetFile && (
         <MoveToFolderModal
-          isOpen={!!searchMoveTargetFile}
+          isOpen={Boolean(searchMoveTargetFile)}
           onClose={() => setSearchMoveTargetFile(null)}
           selectedFiles={[searchMoveTargetFile]}
           folders={folders}
           allFiles={files}
-          onConfirmMove={folderId => {
+          onConfirmMove={(folderId) => {
             handleMoveFilesToFolder([searchMoveTargetFile.id], folderId);
             setSearchMoveTargetFile(null);
           }}
