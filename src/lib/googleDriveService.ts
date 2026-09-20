@@ -23,7 +23,7 @@ export interface SharedDriveInfo {
 export async function listSharedDrives(accessToken: string): Promise<SharedDriveInfo[]> {
   const drives: SharedDriveInfo[] = [];
   let pageToken: string | undefined;
-  for (let i = 0; i < 10; i++) {
+  for (let i = 0; i < 40; i++) {
     const params = new URLSearchParams({
       pageSize: '50',
       fields: 'nextPageToken,drives(id,name)',
@@ -70,7 +70,7 @@ function buildDriveQuery(fileType: DriveFileTypeFilter = 'all'): string {
 export async function fetchGoogleDriveData(
   accessToken: string,
   fileType: DriveFileTypeFilter = 'all',
-  maxPages: number = 20,
+  maxPages: number = 40, // ~20k items at pageSize 500
   corpus: DriveCorpus = 'user',
   driveId?: string
 ): Promise<DriveFetchResult> {
@@ -145,7 +145,7 @@ export async function fetchGoogleDriveData(
         id: item.id,
         name: item.name,
         mimeType: item.mimeType || 'application/octet-stream',
-        size: item.size ? parseInt(item.size, 10) : 1024,
+        size: item.size ? parseInt(item.size, 10) : 0, // 0 = size unavailable (never invent 1024)
         modifiedTime: item.modifiedTime || new Date().toISOString(),
         createdTime: item.createdTime || new Date().toISOString(),
         category,
