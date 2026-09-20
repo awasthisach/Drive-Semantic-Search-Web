@@ -38,6 +38,9 @@ jobs:
       - name: Typecheck
         run: npm run lint
 
+      - name: Security audit (production)
+        run: npm audit --omit=dev --audit-level=high || true
+
       - name: Unit tests
         run: npm test
 
