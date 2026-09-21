@@ -56,6 +56,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [deleteTargetFiles, setDeleteTargetFiles] = useState<DriveFile[]>([]);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const PAGE_SIZE = 60;
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -72,6 +74,15 @@ export const Dashboard: React.FC<DashboardProps> = ({
     const ranked = runSemanticSearch(searchTerm, list, 'all');
     return ranked.map(r => r.file);
   }, [files, filterCategory, searchTerm]);
+
+  React.useEffect(() => {
+    setVisibleCount(PAGE_SIZE);
+  }, [filterCategory, searchTerm, files.length]);
+
+  const visibleFiles = useMemo(
+    () => filteredFiles.slice(0, visibleCount),
+    [filteredFiles, visibleCount]
+  );
 
   const selectedFilesList = useMemo(() => files.filter(f => selectedFileIds.has(f.id)), [files, selectedFileIds]);
 
@@ -260,7 +271,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-        {filteredFiles.map(file => (
+        {visibleFiles.map(file => (
           <div key={file.id} className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3 hover:border-blue-400 transition cursor-pointer"
             onClick={() => onSelectPreviewFile(file)}>
             <div className="flex items-start gap-2">
@@ -296,6 +307,18 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
       {filteredFiles.length === 0 && (
         <div className="text-center py-12 text-sm text-zinc-500">No files found. Connect Drive and Sync.</div>
+      )}
+
+      {filteredFiles.length > visibleCount && (
+        <div className="flex justify-center pt-2">
+          <button
+            type="button"
+            className="px-4 py-2 rounded-xl border border-zinc-300 dark:border-zinc-700 text-sm font-semibold hover:bg-zinc-50 dark:hover:bg-zinc-800"
+            onClick={() => setVisibleCount(c => c + PAGE_SIZE)}
+          >
+            Load more ({visibleCount} / {filteredFiles.length})
+          </button>
+        </div>
       )}
 
       <MoveToFolderModal
