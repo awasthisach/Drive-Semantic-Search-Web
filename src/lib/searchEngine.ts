@@ -2,7 +2,7 @@
 import { DriveFile, SemanticSearchResult } from '../types';
 import { searchContentIndex } from './contentIndex';
 
-/** Common English stopwords — no +45 phrase boost for these alone. */
+/** Common words — block summary/tags spam only; filename matches always allowed. */
 const STOPWORDS = new Set([
   'a', 'an', 'the', 'and', 'or', 'of', 'to', 'in', 'on', 'for', 'is', 'are', 'was', 'were',
   'be', 'been', 'it', 'this', 'that', 'with', 'from', 'by', 'as', 'at', 'into', 'about',
@@ -17,25 +17,31 @@ function metadataScore(query: string, file: DriveFile): { score: number; reasons
   const summaryLower = (file.semanticSummary || '').toLowerCase();
   const tagsCombined = (file.tags || []).join(' ').toLowerCase();
   const q = query.toLowerCase().trim();
-
-  // Exact filename (with or without extension stem) gets strong boost
   const nameStem = fileNameLower.replace(/\.[a-z0-9]{1,8}$/i, '');
-  if (fileNameLower === q || nameStem === q) {
+
+  const exactName = fileNameLower === q || nameStem === q;
+  const multiPhrase =
+    queryTerms.length > 1 && (fileNameLower.includes(q) || summaryLower.includes(q));
+
+  if (exactName) {
     score += 50;
     reasons.push('Exact filename match');
-  } else if (queryTerms.length > 1 && (fileNameLower.includes(q) || summaryLower.includes(q))) {
-    // Multi-word phrase only — avoids "report"/"the" +45 inflation
+  } else if (multiPhrase) {
     score += 45;
     reasons.push('Metadata phrase match');
   }
 
   let matchedTermsCount = 0;
   for (const term of queryTerms) {
-    if (STOPWORDS.has(term) && queryTerms.length === 1) continue;
+    // Filename match always counts (N2: "report" in "Annual report.pdf")
     if (fileNameLower.includes(term)) {
       score += 25;
       matchedTermsCount++;
-    } else if (summaryLower.includes(term)) {
+      continue;
+    }
+    // Stopwords only suppress summary/tags boosts, not filename
+    if (STOPWORDS.has(term)) continue;
+    if (summaryLower.includes(term)) {
       score += 15;
       matchedTermsCount++;
     } else if (tagsCombined.includes(term)) {
@@ -44,7 +50,9 @@ function metadataScore(query: string, file: DriveFile): { score: number; reasons
     }
   }
   if (matchedTermsCount > 0) reasons.push(`Metadata terms ${matchedTermsCount}/${queryTerms.length}`);
-  if (file.starred) {
+
+  // N1: starred bonus only when there is already a real match
+  if (file.starred && (matchedTermsCount > 0 || exactName || multiPhrase)) {
     score += 5;
     reasons.push('Starred');
   }
@@ -72,21 +80,16 @@ export async function runHybridSearch(
   }
 
   const contentHits = await searchContentIndex(query);
-
   const results: SemanticSearchResult[] = [];
 
   for (const file of filtered) {
     const meta = metadataScore(query, file);
     const content = contentHits.get(file.id);
-    // Do NOT normalize content scores to 100 relative to local max —
-    // that forced weak content hits to dominate strong filename matches.
-    // BM25-ish scores are small; scale modestly into metadata 0–100 space.
     const contentScore = content ? Math.min(40, content.score * 8) : 0;
 
     let score: number;
     const reasons = [...meta.reasons];
     if (contentScore > 0) {
-      // Metadata primary; content is a bounded additive boost (max +40)
       score = Math.round(Math.min(100, meta.score + contentScore * 0.5));
       reasons.push('Content body match');
     } else {

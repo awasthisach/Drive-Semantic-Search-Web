@@ -52,16 +52,40 @@ describe('runSemanticSearch', () => {
     expect(results[0].score).toBeGreaterThan(results.find(r => r.file.id === '2')?.score ?? 0);
   });
 
-  it('does not give full phrase bonus for single stopword-like query', () => {
+  it('does not give full phrase bonus for single stopword-like query in summary only', () => {
     const many = {
       ...base,
       id: '3',
       name: 'Meeting notes.pdf',
       semanticSummary: 'This is a report about the team',
+      tags: [],
     };
     const results = runSemanticSearch('report', [many]);
     if (results.length) {
       expect(results[0].score).toBeLessThan(50);
     }
+  });
+
+  it('single-term domain word still matches filename', () => {
+    const f = {
+      ...base,
+      name: 'Annual report 2025.pdf',
+      starred: false,
+      semanticSummary: 'Google Drive file of type application/pdf',
+      tags: [],
+    };
+    expect(runSemanticSearch('report', [f]).length).toBe(1);
+  });
+
+  it('starred irrelevant file excluded when no match', () => {
+    const junk = {
+      ...base,
+      id: '9',
+      name: 'Hemp law Adm.pdf',
+      starred: true,
+      tags: [],
+      semanticSummary: 'Google Drive file "Hemp law Adm.pdf" of type application/pdf',
+    };
+    expect(runSemanticSearch('tinywow_cannabis indica', [junk]).length).toBe(0);
   });
 });
