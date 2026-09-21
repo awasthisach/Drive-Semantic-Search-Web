@@ -1,0 +1,44 @@
+name: Commit package-lock.json
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - package.json
+    branches: [main, master]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: commit-lockfile
+  cancel-in-progress: true
+
+jobs:
+  lockfile:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Generate package-lock.json
+        run: npm install --package-lock-only --no-audit --no-fund
+
+      - name: Commit if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package-lock.json
+          if git diff --staged --quiet; then
+            echo "package-lock.json unchanged"
+          else
+            git commit -m "Add/update package-lock.json for reproducible npm ci"
+            git push
+          fi
