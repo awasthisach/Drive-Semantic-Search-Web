@@ -20,6 +20,24 @@ import { verifyFilesHashQueue } from '../lib/hashVerifier';
 import { removeIndexedDocument } from '../lib/contentIndex';
 import type { DriveAppState } from './useDriveAppState';
 
+/** Bounded concurrency for Drive mutations (quota-friendly). */
+async function poolMap<T>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<void>
+): Promise<void> {
+  const queue = items.slice();
+  const n = Math.max(1, Math.min(limit, queue.length || 1));
+  const workers = Array.from({ length: n }, async () => {
+    for (;;) {
+      const item = queue.shift();
+      if (item === undefined) break;
+      await fn(item);
+    }
+  });
+  await Promise.all(workers);
+}
+
 export function useDriveHandlersRest(s: DriveAppState) {
   const {
     files, setFiles, folders, setFolders, setVaultFiles,
@@ -75,11 +93,11 @@ export function useDriveHandlersRest(s: DriveAppState) {
     if (driveItems.length === 0) return;
     const succeeded: string[] = [];
     const failed: string[] = [];
-    for (const f of driveItems) {
+    await poolMap(driveItems, 4, async (f) => {
       try {
         await withDriveAuthRetry(
           async () => (await ensureValidToken()) || googleAccessToken || (await getAccessToken()),
-          t => setGoogleAccessToken(t),
+          tok => setGoogleAccessToken(tok),
           tok => deleteGoogleDriveFile(tok, f.id)
         );
         succeeded.push(f.id);
@@ -87,7 +105,7 @@ export function useDriveHandlersRest(s: DriveAppState) {
         console.error(err);
         failed.push(f.name);
       }
-    }
+    });
     if (succeeded.length) {
       const ok = new Set(succeeded);
       setFiles(prev => prev.filter(f => !ok.has(f.id)));
@@ -120,15 +138,14 @@ export function useDriveHandlersRest(s: DriveAppState) {
     const idSet = new Set(fileIds);
     const toMove = files.filter(f => idSet.has(f.id));
     const succeeded: string[] = [];
-    for (const f of toMove) {
-      if (!f.isGoogleDriveItem) {
-        succeeded.push(f.id);
-        continue;
-      }
+    const driveMoves = toMove.filter(f => f.isGoogleDriveItem);
+    const localMoves = toMove.filter(f => !f.isGoogleDriveItem);
+    for (const f of localMoves) succeeded.push(f.id);
+    await poolMap(driveMoves, 4, async (f) => {
       try {
         await withDriveAuthRetry(
           async () => (await ensureValidToken()) || googleAccessToken || (await getAccessToken()),
-          t => setGoogleAccessToken(t),
+          tok => setGoogleAccessToken(tok),
           tok => moveGoogleDriveFile(tok, f.id, targetFolderId || 'root')
         );
         succeeded.push(f.id);
@@ -136,7 +153,7 @@ export function useDriveHandlersRest(s: DriveAppState) {
         console.error(err);
         showDriveToast('Move failed for ' + f.name + ': ' + (err?.message || 'error'));
       }
-    }
+    });
     if (succeeded.length) {
       const ok = new Set(succeeded);
       setFiles(prev => prev.map(f => (ok.has(f.id) ? { ...f, folderId: targetFolderId } : f)));
