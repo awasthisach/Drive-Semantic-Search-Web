@@ -38,4 +38,30 @@ describe('runSemanticSearch', () => {
     expect(results[0].score).toBe(0);
     expect(results[0].relevanceReason).toMatch(/Browse/i);
   });
+
+  it('ranks exact filename match above weak summary-only match', () => {
+    const exact = { ...base, id: '1', name: 'Budget 2024.pdf', semanticSummary: 'Annual plan' };
+    const weak = {
+      ...base,
+      id: '2',
+      name: 'Random notes.txt',
+      semanticSummary: 'Someone mentioned budget casually once',
+    };
+    const results = runSemanticSearch('Budget 2024', [exact, weak]);
+    expect(results[0].file.id).toBe('1');
+    expect(results[0].score).toBeGreaterThan(results.find(r => r.file.id === '2')?.score ?? 0);
+  });
+
+  it('does not give full phrase bonus for single stopword-like query', () => {
+    const many = {
+      ...base,
+      id: '3',
+      name: 'Meeting notes.pdf',
+      semanticSummary: 'This is a report about the team',
+    };
+    const results = runSemanticSearch('report', [many]);
+    if (results.length) {
+      expect(results[0].score).toBeLessThan(50);
+    }
+  });
 });

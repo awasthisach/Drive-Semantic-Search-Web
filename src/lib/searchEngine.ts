@@ -2,6 +2,13 @@
 import { DriveFile, SemanticSearchResult } from '../types';
 import { searchContentIndex } from './contentIndex';
 
+/** Common English stopwords — no +45 phrase boost for these alone. */
+const STOPWORDS = new Set([
+  'a', 'an', 'the', 'and', 'or', 'of', 'to', 'in', 'on', 'for', 'is', 'are', 'was', 'were',
+  'be', 'been', 'it', 'this', 'that', 'with', 'from', 'by', 'as', 'at', 'into', 'about',
+  'report', 'file', 'document', 'pdf', 'doc', 'sheet',
+]);
+
 function metadataScore(query: string, file: DriveFile): { score: number; reasons: string[] } {
   const queryTerms = query.toLowerCase().split(/\s+/).filter(Boolean);
   let score = 0;
@@ -9,15 +16,22 @@ function metadataScore(query: string, file: DriveFile): { score: number; reasons
   const fileNameLower = file.name.toLowerCase();
   const summaryLower = (file.semanticSummary || '').toLowerCase();
   const tagsCombined = (file.tags || []).join(' ').toLowerCase();
-  const q = query.toLowerCase();
+  const q = query.toLowerCase().trim();
 
-  if (summaryLower.includes(q) || fileNameLower.includes(q)) {
+  // Exact filename (with or without extension stem) gets strong boost
+  const nameStem = fileNameLower.replace(/\.[a-z0-9]{1,8}$/i, '');
+  if (fileNameLower === q || nameStem === q) {
+    score += 50;
+    reasons.push('Exact filename match');
+  } else if (queryTerms.length > 1 && (fileNameLower.includes(q) || summaryLower.includes(q))) {
+    // Multi-word phrase only — avoids "report"/"the" +45 inflation
     score += 45;
     reasons.push('Metadata phrase match');
   }
 
   let matchedTermsCount = 0;
   for (const term of queryTerms) {
+    if (STOPWORDS.has(term) && queryTerms.length === 1) continue;
     if (fileNameLower.includes(term)) {
       score += 25;
       matchedTermsCount++;
@@ -58,22 +72,22 @@ export async function runHybridSearch(
   }
 
   const contentHits = await searchContentIndex(query);
-  let maxContent = 0;
-  contentHits.forEach(v => {
-    if (v.score > maxContent) maxContent = v.score;
-  });
 
   const results: SemanticSearchResult[] = [];
 
   for (const file of filtered) {
     const meta = metadataScore(query, file);
     const content = contentHits.get(file.id);
-    const contentNorm = content && maxContent > 0 ? Math.min(100, (content.score / maxContent) * 100) : 0;
+    // Do NOT normalize content scores to 100 relative to local max —
+    // that forced weak content hits to dominate strong filename matches.
+    // BM25-ish scores are small; scale modestly into metadata 0–100 space.
+    const contentScore = content ? Math.min(40, content.score * 8) : 0;
 
     let score: number;
     const reasons = [...meta.reasons];
-    if (content && contentNorm > 0) {
-      score = Math.round(0.4 * meta.score + 0.6 * contentNorm);
+    if (contentScore > 0) {
+      // Metadata primary; content is a bounded additive boost (max +40)
+      score = Math.round(Math.min(100, meta.score + contentScore * 0.5));
       reasons.push('Content body match');
     } else {
       score = meta.score;
