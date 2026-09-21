@@ -1,6 +1,0 @@
-{
-  "name": "Perfect VVF - Secure Drive & Responsive Emulator",
-  "description": "Virtual Vault & Files suite with Google Drive sync, Phone Memory & SD Card storage scanner, client-side AES-256 encryption, duplicate finder, semantic search, and an interactive multi-device viewport emulator.",
-  "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
-}
