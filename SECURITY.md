@@ -55,3 +55,8 @@ This app is a static SPA on GitHub Pages, so tokens must live in the page contex
 5. **Broad Drive scope** is required for trash/move/upload/star in-browser; a read-only mode would need a separate OAuth client and reduced feature set.
 
 Backend token proxy / httpOnly cookies are **out of scope** for pure GitHub Pages static hosting.
+
+## Supply chain
+
+- CI uses `npm ci` with committed `package-lock.json` for reproducible installs.
+- Production dependency audit runs at `npm audit --omit=dev --audit-level=high` (fails the build on high/critical).
