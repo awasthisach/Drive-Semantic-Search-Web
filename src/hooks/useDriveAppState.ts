@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { DriveFile, VaultFile, SyncStats, FolderItem } from '../types';
+import { DriveFile, VaultFile, SyncStats, FolderItem, AppTab } from '../types';
 import { INITIAL_FILES, INITIAL_FOLDERS } from '../lib/driveApi';
 import { initAuth } from '../lib/firebaseAuth';
 import {
@@ -34,7 +34,7 @@ export function useDriveAppState() {
   filesRef.current = files;
   foldersRef.current = folders;
 
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'storage_scanner' | 'vault' | 'duplicates' | 'search' | 'offline'>('dashboard');
+  const [activeTab, setActiveTab] = useState<AppTab>('dashboard');
   const [syncStats, setSyncStats] = useState<SyncStats>({
     status: 'synced', lastSynced: new Date().toISOString(), pendingCount: 0,
     totalSyncedCount: INITIAL_FILES.length, bandwidthUsage: '142 KB/s', networkOnline: true,
