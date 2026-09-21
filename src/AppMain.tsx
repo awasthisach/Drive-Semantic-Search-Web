@@ -82,7 +82,7 @@ export default function App() {
             onUploadFile={handleUploadFile} onUploadToDrive={handleUploadToDrive} onDeleteFile={handleDeleteFile}
             onDeleteMultipleFiles={handleRemoveMultipleFiles} onMoveFilesToFolder={handleMoveFilesToFolder}
             onCreateFolder={handleCreateFolder} onToggleStar={handleToggleStar} onToggleOffline={handleToggleOffline}
-            onSelectTab={tab => setActiveTab(tab as any)} onSelectPreviewFile={setPreviewFile}
+            onSelectTab={tab => setActiveTab(tab)} onSelectPreviewFile={setPreviewFile}
             isGoogleConnected={isGoogleConnected} isGoogleLoading={isGoogleLoading}
             googleUserEmail={userProfile.email}
             onConnectGoogleDrive={handleGoogleSignIn} onConnectDemoDrive={handleConnectDemoDrive}
