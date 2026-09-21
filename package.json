@@ -16,22 +16,22 @@
     "format:check": "node -e \"console.log('Prettier not required in CI; run npx prettier --write src if desired')\""
   },
   "dependencies": {
-    "@tailwindcss/vite": "^4.1.14",
-    "@vitejs/plugin-react": "^5.0.4",
-    "firebase": "^12.19.0",
-    "lucide-react": "^0.546.0",
-    "react": "^19.0.1",
-    "react-dom": "^19.0.1",
-    "vite": "^6.2.3"
+    "@tailwindcss/vite": "4.3.3",
+    "@vitejs/plugin-react": "5.2.0",
+    "firebase": "12.19.0",
+    "lucide-react": "0.546.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "vite": "6.4.3"
   },
   "devDependencies": {
-    "@types/node": "^22.14.0",
-    "@types/react": "^19.0.10",
-    "@types/react-dom": "^19.0.4",
-    "autoprefixer": "^10.4.21",
-    "tailwindcss": "^4.1.14",
-    "typescript": "~5.8.2",
-    "vite-plugin-pwa": "^1.3.0",
-    "vitest": "^5.0.1"
+    "@types/node": "22.20.4",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "autoprefixer": "10.6.1",
+    "tailwindcss": "4.3.3",
+    "typescript": "5.8.3",
+    "vite-plugin-pwa": "1.3.0",
+    "vitest": "5.0.1"
   }
 }
