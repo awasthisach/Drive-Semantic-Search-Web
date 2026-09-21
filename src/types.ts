@@ -69,33 +69,7 @@ export interface SyncStats {
   networkOnline: boolean;
 }
 
-export type DeviceCategory = 'mobile' | 'tablet' | 'desktop';
-export type DeviceOrientation = 'portrait' | 'landscape';
-
-export interface DeviceProfile {
-  id: string;
-  name: string;
-  category: DeviceCategory;
-  width: number;
-  height: number;
-  dpr: number;
-  aspectRatio: string;
-  os: 'ios' | 'android' | 'macos' | 'windows';
-  bezelRadius: number;
-}
-
-export interface LayoutGlitchItem {
-  id: string;
-  title: string;
-  viewport: string;
-  aspectRatio: string;
-  category: 'overflow' | 'alignment' | 'touch_target' | 'image_scaling' | 'orientation';
-  severity: 'high' | 'medium' | 'low';
-  glitchDescription: string;
-  rootCause: string;
-  fixApplied: string;
-  status: 'fixed' | 'verified';
-}
+export type AppTab = 'dashboard' | 'storage_scanner' | 'vault' | 'duplicates' | 'search' | 'offline';
 
 export type StorageSource = 'phone_internal' | 'sd_card';
 
