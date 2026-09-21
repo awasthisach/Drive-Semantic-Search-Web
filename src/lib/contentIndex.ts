@@ -334,7 +334,15 @@ export async function searchContentIndex(
   }
   const allFiles = new Set<string>();
   for (const list of termPostings) for (const p of list) allFiles.add(p.fileId);
-  const N = Math.max(allFiles.size, 1);
+  // IDF needs total corpus size, not just docs that matched any query term
+  let corpusN = allFiles.size;
+  try {
+    const docs = await listIndexedDocuments();
+    corpusN = Math.max(docs.length, allFiles.size, 1);
+  } catch {
+    corpusN = Math.max(allFiles.size, 1);
+  }
+  const N = Math.max(corpusN, 1);
 
   type Acc = { score: number; bestChunkIdx: number; bestTf: number };
   const scores = new Map<string, Acc>();
@@ -374,7 +382,7 @@ async function searchContentIndexLegacy(
 ): Promise<Map<string, { score: number; snippet: string }>> {
   const out = new Map<string, { score: number; snippet: string }>();
   let chunks = await getAllChunks();
-  const MAX_SCAN = 40_000;
+  const MAX_SCAN = 5_000;
   if (chunks.length > MAX_SCAN) chunks = chunks.slice(0, MAX_SCAN);
   const N = Math.max(chunks.length, 1);
   const df = new Map<string, number>();
