@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { DriveFile, VaultFile, SyncStats, FolderItem } from '../types';
 import { INITIAL_FILES, INITIAL_FOLDERS } from '../lib/driveApi';
 import { initAuth } from '../lib/firebaseAuth';
@@ -28,6 +28,12 @@ export function useDriveAppState() {
   const [driveNotification, setDriveNotification] = useState<string | null>(null);
   const [authErrorModalOpen, setAuthErrorModalOpen] = useState(false);
   const [authErrorMessage, setAuthErrorMessage] = useState('');
+  // Keep latest files/folders for initAuth (avoids stale INITIAL_FILES closure)
+  const filesRef = useRef(files);
+  const foldersRef = useRef(folders);
+  filesRef.current = files;
+  foldersRef.current = folders;
+
   const [activeTab, setActiveTab] = useState<'dashboard' | 'storage_scanner' | 'vault' | 'duplicates' | 'search' | 'offline'>('dashboard');
   const [syncStats, setSyncStats] = useState<SyncStats>({
     status: 'synced', lastSynced: new Date().toISOString(), pendingCount: 0,
@@ -129,8 +135,9 @@ export function useDriveAppState() {
             typeToUse: 'all',
             corpus: savedCorpus === 'drive' && savedDriveId ? 'drive' : savedCorpus === 'allDrives' ? 'allDrives' : 'user',
             driveId: savedDriveId,
-            currentFiles: files,
-            currentFolders: folders,
+            // Use refs so we merge against cached/snapshot state, not mount-time INITIAL_FILES
+            currentFiles: filesRef.current,
+            currentFolders: foldersRef.current,
           });
           setDriveTruncated(result.truncated);
           setFiles(result.files);
