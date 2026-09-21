@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
-  Search, Sparkles, Loader2, Database, FolderInput,
+  Search, Sparkles, Loader2, Database, FolderInput, Star, Pin, Link2,
 } from 'lucide-react';
 import { DriveFile, FolderItem, SemanticSearchResult } from '../types';
 import { runHybridSearch } from '../lib/searchEngine';
@@ -20,6 +20,8 @@ interface SemanticSearchProps {
   folders?: FolderItem[];
   onSelectFile: (file: DriveFile) => void;
   onMoveFile?: (file: DriveFile) => void;
+  onToggleStar?: (id: string) => void;
+  onToggleOffline?: (id: string) => void;
   accessToken?: string | null;
   onRequestToken?: () => Promise<string | null>;
   /** Scope content index records to My Drive / Shared Drive */
@@ -37,6 +39,8 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
   files,
   onSelectFile,
   onMoveFile,
+  onToggleStar,
+  onToggleOffline,
   accessToken,
   onRequestToken,
   corpusKey,
@@ -48,7 +52,22 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
   const [indexedCount, setIndexedCount] = useState(0);
   const [indexing, setIndexing] = useState(false);
   const [indexProgress, setIndexProgress] = useState('');
+  const [copiedId, setCopiedId] = useState<string | null>(null);
   const cancelIndexRef = useRef(false);
+
+  const copyLink = async (file: DriveFile) => {
+    const link =
+      file.webViewLink ||
+      (file.isGoogleDriveItem ? 'https://drive.google.com/file/d/' + file.id + '/view' : '');
+    if (!link) return;
+    try {
+      await navigator.clipboard.writeText(link);
+      setCopiedId(file.id);
+      window.setTimeout(() => setCopiedId(prev => (prev === file.id ? null : prev)), 1600);
+    } catch {
+      setCopiedId(null);
+    }
+  };
 
   const refreshIndexedCount = useCallback(async () => {
     const docs = await listIndexedDocuments();
@@ -268,17 +287,29 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
             <p className="text-sm text-zinc-500 text-center py-8">No matches. Broaden the query.</p>
           )
         )}
-        {results.map(r => (
-          <button
+        {results.map(r => {
+          const live = files.find(f => f.id === r.file.id) || r.file;
+          const link =
+            live.webViewLink ||
+            (live.isGoogleDriveItem ? 'https://drive.google.com/file/d/' + live.id + '/view' : '');
+          return (
+          <div
             key={r.file.id}
-            type="button"
-            onClick={() => onSelectFile(r.file)}
-            className="w-full text-left rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3 hover:border-blue-400 transition"
+            role="button"
+            tabIndex={0}
+            onClick={() => onSelectFile(live)}
+            onKeyDown={e => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onSelectFile(live);
+              }
+            }}
+            className="w-full text-left rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3 hover:border-blue-400 transition cursor-pointer"
           >
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
-                <div className="text-sm font-semibold truncate">{r.file.name}</div>
-                <div className="text-[11px] text-zinc-500 mt-0.5">{formatBytes(r.file.size)}</div>
+                <div className="text-sm font-semibold truncate">{live.name}</div>
+                <div className="text-[11px] text-zinc-500 mt-0.5">{formatBytes(live.size)}</div>
                 <div className="flex flex-wrap gap-1 mt-1">
                   {(r.relevanceReason || '')
                     .split(' · ')
@@ -311,29 +342,55 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
                 <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-600">
                   {r.score > 0 ? `Match ${r.score}` : '—'}
                 </span>
-                {onMoveFile && (
-                  <span
-                    role="button"
-                    tabIndex={0}
-                    className="inline-flex items-center gap-0.5 text-[10px] font-bold text-indigo-600 hover:underline"
-                    onClick={e => {
-                      e.stopPropagation();
-                      onMoveFile(r.file);
-                    }}
-                    onKeyDown={e => {
-                      if (e.key === 'Enter') {
-                        e.stopPropagation();
-                        onMoveFile(r.file);
-                      }
-                    }}
-                  >
-                    <FolderInput className="w-3.5 h-3.5" /> Move
-                  </span>
-                )}
+                <div className="flex flex-wrap justify-end gap-1" onClick={e => e.stopPropagation()}>
+                  {onToggleStar && (
+                    <button
+                      type="button"
+                      title={live.starred ? 'Unstar' : 'Star'}
+                      className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[10px] font-bold text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/30"
+                      onClick={() => onToggleStar(live.id)}
+                    >
+                      <Star className={`w-3.5 h-3.5 ${live.starred ? 'fill-amber-500 text-amber-500' : ''}`} />
+                      {live.starred ? 'Starred' : 'Star'}
+                    </button>
+                  )}
+                  {onToggleOffline && live.isGoogleDriveItem && (
+                    <button
+                      type="button"
+                      title={live.isOffline ? 'Unpin offline' : 'Pin offline'}
+                      className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[10px] font-bold text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/30"
+                      onClick={() => onToggleOffline(live.id)}
+                    >
+                      <Pin className={`w-3.5 h-3.5 ${live.isOffline ? 'fill-emerald-500' : ''}`} />
+                      {live.isOffline ? 'Pinned' : 'Pin'}
+                    </button>
+                  )}
+                  {link ? (
+                    <button
+                      type="button"
+                      title="Copy Drive link"
+                      className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[10px] font-bold text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                      onClick={() => void copyLink(live)}
+                    >
+                      <Link2 className="w-3.5 h-3.5" />
+                      {copiedId === live.id ? 'Copied' : 'Link'}
+                    </button>
+                  ) : null}
+                  {onMoveFile && (
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[10px] font-bold text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-950/30"
+                      onClick={() => onMoveFile(live)}
+                    >
+                      <FolderInput className="w-3.5 h-3.5" /> Move
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
-          </button>
-        ))}
+          </div>
+          );
+        })}
       </div>
     </div>
   );
