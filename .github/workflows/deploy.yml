@@ -27,7 +27,8 @@ jobs:
           node-version: 22
 
       - name: Install dependencies
-        run: npm ci
+        run: |
+          if [ -f package-lock.json ]; then npm ci; else echo "No lockfile — npm install"; npm install; fi
 
       - name: Typecheck
         run: npm run lint
