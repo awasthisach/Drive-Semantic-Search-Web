@@ -277,6 +277,20 @@ export async function listIndexedDocuments(): Promise<IndexedDocument[]> {
   }
 }
 
+/** Cheap DOC_STORE count — for IDF N without loading every document preview. */
+export async function countIndexedDocuments(): Promise<number> {
+  try {
+    const db = await openDb();
+    return new Promise((resolve) => {
+      const req = db.transaction(DOC_STORE, 'readonly').objectStore(DOC_STORE).count();
+      req.onsuccess = () => resolve(req.result || 0);
+      req.onerror = () => resolve(0);
+    });
+  } catch {
+    return 0;
+  }
+}
+
 export async function getChunksForFile(fileId: string): Promise<IndexedChunk[]> {
   try {
     const db = await openDb();
@@ -334,14 +348,8 @@ export async function searchContentIndex(
   }
   const allFiles = new Set<string>();
   for (const list of termPostings) for (const p of list) allFiles.add(p.fileId);
-  // IDF needs total corpus size, not just docs that matched any query term
-  let corpusN = allFiles.size;
-  try {
-    const docs = await listIndexedDocuments();
-    corpusN = Math.max(docs.length, allFiles.size, 1);
-  } catch {
-    corpusN = Math.max(allFiles.size, 1);
-  }
+  // IDF needs total corpus size — use count(), not getAll() of every doc preview
+  const corpusN = Math.max(await countIndexedDocuments(), allFiles.size, 1);
   const N = Math.max(corpusN, 1);
 
   type Acc = { score: number; bestChunkIdx: number; bestTf: number };
