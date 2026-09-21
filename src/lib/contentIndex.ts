@@ -304,19 +304,6 @@ export async function getChunksForFile(fileId: string): Promise<IndexedChunk[]> 
   }
 }
 
-export async function getAllChunks(): Promise<IndexedChunk[]> {
-  try {
-    const db = await openDb();
-    return new Promise((resolve, reject) => {
-      const req = db.transaction(CHUNK_STORE, 'readonly').objectStore(CHUNK_STORE).getAll();
-      req.onsuccess = () => resolve(req.result || []);
-      req.onerror = () => reject(req.error);
-    });
-  } catch {
-    return [];
-  }
-}
-
 async function getPostingsForTerm(term: string): Promise<Posting[]> {
   try {
     const db = await openDb();
@@ -338,9 +325,9 @@ export async function searchContentIndex(
   const out = new Map<string, { score: number; snippet: string }>();
   if (!terms.length) return out;
 
-  const termPostings: Posting[][] = [];
-  for (const t of terms) termPostings.push(await getPostingsForTerm(t));
-  if (!termPostings.some(p => p.length > 0)) return searchContentIndexLegacy(terms);
+  // Parallel postings fetch; no legacy full-store scan (miss → empty; UI shows index CTA)
+  const termPostings: Posting[][] = await Promise.all(terms.map(t => getPostingsForTerm(t)));
+  if (!termPostings.some(p => p.length > 0)) return out;
 
   const df = new Map<string, number>();
   for (let i = 0; i < terms.length; i++) {
@@ -381,37 +368,6 @@ export async function searchContentIndex(
       snippet = (ch?.text || '').slice(0, 160).trim();
     } catch { /* ignore */ }
     out.set(fileId, { score: acc.score, snippet });
-  }
-  return out;
-}
-
-async function searchContentIndexLegacy(
-  terms: string[]
-): Promise<Map<string, { score: number; snippet: string }>> {
-  const out = new Map<string, { score: number; snippet: string }>();
-  let chunks = await getAllChunks();
-  const MAX_SCAN = 5_000;
-  if (chunks.length > MAX_SCAN) chunks = chunks.slice(0, MAX_SCAN);
-  const N = Math.max(chunks.length, 1);
-  const df = new Map<string, number>();
-  for (const term of terms) {
-    let c = 0;
-    for (const ch of chunks) if (ch.text.toLowerCase().includes(term)) c++;
-    df.set(term, c);
-  }
-  for (const ch of chunks) {
-    const text = ch.text.toLowerCase();
-    let score = 0;
-    for (const term of terms) {
-      if (!text.includes(term)) continue;
-      const tf = (text.match(new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')) || []).length;
-      const docFreq = df.get(term) || 0;
-      const idf = Math.log(1 + (N - docFreq + 0.5) / (docFreq + 0.5));
-      score += (tf * idf) / (tf + 1.2);
-    }
-    if (score <= 0) continue;
-    const prev = out.get(ch.fileId);
-    if (!prev || score > prev.score) out.set(ch.fileId, { score, snippet: ch.text.slice(0, 160).trim() });
   }
   return out;
 }

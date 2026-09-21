@@ -212,7 +212,24 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
 
       <div className="space-y-2">
         {results.length === 0 && query.trim() && !searching && (
-          <p className="text-sm text-zinc-500 text-center py-8">No matches. Index content or broaden the query.</p>
+          indexedCount === 0 ? (
+            <div className="text-center py-8 space-y-3">
+              <p className="text-sm text-zinc-500">
+                Content index is empty — index extractable files for body search.
+              </p>
+              <button
+                type="button"
+                disabled={indexing}
+                onClick={handleIndexContent}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 text-white text-xs font-bold disabled:opacity-50"
+              >
+                {indexing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Database className="w-4 h-4" />}
+                {indexing ? 'Indexing…' : 'Index extractable content'}
+              </button>
+            </div>
+          ) : (
+            <p className="text-sm text-zinc-500 text-center py-8">No matches. Broaden the query.</p>
+          )
         )}
         {results.map(r => (
           <button
