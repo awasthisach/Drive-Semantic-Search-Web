@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Search, Sparkles, Loader2, Database, FolderInput,
 } from 'lucide-react';
@@ -13,6 +13,7 @@ import {
   isDocumentStale,
   MAX_INDEX_CHARS,
 } from '../lib/contentIndex';
+import { highlightSegments } from '../lib/searchHighlight';
 
 interface SemanticSearchProps {
   files: DriveFile[];
@@ -47,6 +48,7 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
   const [indexedCount, setIndexedCount] = useState(0);
   const [indexing, setIndexing] = useState(false);
   const [indexProgress, setIndexProgress] = useState('');
+  const cancelIndexRef = useRef(false);
 
   const refreshIndexedCount = useCallback(async () => {
     const docs = await listIndexedDocuments();
@@ -92,21 +94,35 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
       return;
     }
 
+    cancelIndexRef.current = false;
     setIndexing(true);
     let ok = 0;
     let fail = 0;
     let skippedFresh = 0;
     let truncated = 0;
+    const failedNames: string[] = [];
+
     for (let i = 0; i < extractable.length; i++) {
+      if (cancelIndexRef.current) {
+        setIndexProgress(
+          `Cancelled after ${i}/${extractable.length}. Indexed: ${ok}, skipped fresh: ${skippedFresh}, failed: ${fail}.` +
+            (failedNames.length
+              ? ` Failed: ${failedNames.join(', ')}${fail > failedNames.length ? '…' : ''}`
+              : '')
+        );
+        break;
+      }
+
       const f = extractable[i];
-      setIndexProgress(`Checking ${i + 1}/${extractable.length}: ${f.name}`);
+      const pct = Math.round(((i + 1) / extractable.length) * 100);
+      setIndexProgress(`Checking ${i + 1}/${extractable.length} (${pct}%): ${f.name}`);
       try {
         const existing = await getIndexedDocument(f.id);
         if (!isDocumentStale(existing, f.modifiedTime)) {
           skippedFresh++;
           continue;
         }
-        setIndexProgress(`Indexing ${i + 1}/${extractable.length}: ${f.name}`);
+        setIndexProgress(`Indexing ${i + 1}/${extractable.length} (${pct}%): ${f.name}`);
         const { text, source } = await extractDriveFileText(token, f.id, f.mimeType, f.name);
         if (text && text.trim().length > 0) {
           const wasTrunc = text.length > MAX_INDEX_CHARS;
@@ -124,16 +140,24 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
           if (wasTrunc) truncated++;
         } else {
           fail++;
+          if (failedNames.length < 20) failedNames.push(f.name);
         }
       } catch {
         fail++;
+        if (failedNames.length < 20) failedNames.push(f.name);
       }
       await new Promise(r => setTimeout(r, 100));
     }
-    setIndexProgress(
-      `Done: ${ok} indexed, ${skippedFresh} already fresh, ${fail} skipped/failed` +
-        (truncated ? `, ${truncated} truncated to ${MAX_INDEX_CHARS.toLocaleString()} chars` : '')
-    );
+
+    if (!cancelIndexRef.current) {
+      setIndexProgress(
+        `Done: ${ok} indexed, ${skippedFresh} already fresh, ${fail} skipped/failed` +
+          (truncated ? `, ${truncated} truncated to ${MAX_INDEX_CHARS.toLocaleString()} chars` : '') +
+          (failedNames.length
+            ? `. Failed: ${failedNames.join(', ')}${fail > failedNames.length ? '…' : ''}`
+            : '')
+      );
+    }
     setIndexing(false);
     await refreshIndexedCount();
     const r = await runHybridSearch(query, files, selectedCategory);
@@ -164,15 +188,28 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
               <p className="text-xs text-zinc-400">Index Docs/Sheets/text first, then search inside file bodies</p>
             </div>
           </div>
-          <button
-            type="button"
-            disabled={indexing}
-            onClick={handleIndexContent}
-            className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-blue-600 text-white text-xs font-bold disabled:opacity-50"
-          >
-            {indexing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Database className="w-4 h-4" />}
-            {indexing ? 'Indexing…' : 'Index extractable content'}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              disabled={indexing}
+              onClick={handleIndexContent}
+              className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-blue-600 text-white text-xs font-bold disabled:opacity-50"
+            >
+              {indexing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Database className="w-4 h-4" />}
+              {indexing ? 'Indexing…' : 'Index extractable content'}
+            </button>
+            {indexing && (
+              <button
+                type="button"
+                onClick={() => {
+                  cancelIndexRef.current = true;
+                }}
+                className="px-3 py-2 rounded-xl border border-white/20 text-white text-xs font-bold"
+              >
+                Cancel
+              </button>
+            )}
+          </div>
         </div>
         {indexProgress && <p className="text-[11px] text-zinc-400 mt-2">{indexProgress}</p>}
       </div>
@@ -241,8 +278,34 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
                 <div className="text-sm font-semibold truncate">{r.file.name}</div>
-                <div className="text-[11px] text-zinc-500 mt-0.5">{formatBytes(r.file.size)} · {r.relevanceReason}</div>
-                <p className="text-xs text-zinc-600 dark:text-zinc-400 mt-1 line-clamp-2">{r.matchedSnippet}</p>
+                <div className="text-[11px] text-zinc-500 mt-0.5">{formatBytes(r.file.size)}</div>
+                <div className="flex flex-wrap gap-1 mt-1">
+                  {(r.relevanceReason || '')
+                    .split(' · ')
+                    .filter(Boolean)
+                    .map(reason => (
+                      <span
+                        key={reason}
+                        className="inline-flex items-center px-1.5 py-0.5 rounded-md bg-zinc-100 dark:bg-zinc-800 text-[10px] font-medium text-zinc-600 dark:text-zinc-300"
+                      >
+                        {reason}
+                      </span>
+                    ))}
+                </div>
+                <p className="text-xs text-zinc-600 dark:text-zinc-400 mt-1 line-clamp-2">
+                  {highlightSegments(r.matchedSnippet || '', query).map((seg, i) =>
+                    seg.match ? (
+                      <mark
+                        key={i}
+                        className="bg-yellow-200 text-yellow-950 dark:bg-yellow-500/30 dark:text-yellow-100 rounded px-0.5"
+                      >
+                        {seg.text}
+                      </mark>
+                    ) : (
+                      <span key={i}>{seg.text}</span>
+                    )
+                  )}
+                </p>
               </div>
               <div className="flex flex-col items-end gap-1 shrink-0">
                 <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-600">
