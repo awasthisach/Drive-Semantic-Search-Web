@@ -313,3 +313,15 @@ export const googleSignOut = async (options?: { revoke?: boolean }) => {
   }
   persistToken(null);
 };
+
+/** Firebase Auth ID token for backend /embed (not the Drive access token). */
+export async function getFirebaseIdToken(forceRefresh = false): Promise<string | null> {
+  const user = auth.currentUser;
+  if (!user) return null;
+  try {
+    return await user.getIdToken(forceRefresh);
+  } catch (e) {
+    console.warn('[firebaseAuth] getIdToken failed', e);
+    return null;
+  }
+}
