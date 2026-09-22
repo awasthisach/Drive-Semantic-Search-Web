@@ -77,7 +77,8 @@ export function neuralToDisplayScore(cosine: number): number {
 
 async function tryNeuralSearch(
   query: string,
-  corpusKey?: string
+  corpusKey: string | undefined,
+  liveFileIds: Set<string>
 ): Promise<Map<string, { score: number; snippet: string }> | null> {
   if (!isEmbedConfigured() || !corpusKey || !query.trim()) return null;
   try {
@@ -87,6 +88,7 @@ async function tryNeuralSearch(
     const hits = await searchNeuralByEmbedding(qVec, corpusKey, {
       minScore: 0.22,
       topK: 80,
+      liveFileIds,
     });
     const out = new Map<string, { score: number; snippet: string }>();
     for (const h of hits) {
@@ -120,18 +122,31 @@ export async function runHybridSearch(
     }));
   }
 
+  const liveIds = new Set(filtered.map(f => f.id));
   const [contentHits, neuralHits] = await Promise.all([
     searchContentIndex(query, corpusKey),
-    tryNeuralSearch(query, corpusKey),
+    tryNeuralSearch(query, corpusKey, liveIds),
   ]);
 
   const results: SemanticSearchResult[] = [];
   const fileById = new Map(filtered.map(f => [f.id, f]));
 
+  // Candidates = files with any positive signal (not entire drive listing)
   const candidateIds = new Set<string>();
-  for (const f of filtered) candidateIds.add(f.id);
-  for (const id of contentHits.keys()) candidateIds.add(id);
-  if (neuralHits) for (const id of neuralHits.keys()) candidateIds.add(id);
+  for (const f of filtered) {
+    if (metadataScore(query, f).score > 0) candidateIds.add(f.id);
+  }
+  for (const id of contentHits.keys()) {
+    if (fileById.has(id)) candidateIds.add(id);
+  }
+  if (neuralHits) {
+    for (const id of neuralHits.keys()) {
+      if (fileById.has(id)) candidateIds.add(id);
+    }
+  }
+
+  // neuralHits !== null means embed pipeline succeeded (may be empty map)
+  const neuralPipelineOk = neuralHits !== null;
 
   for (const id of candidateIds) {
     const file = fileById.get(id);
@@ -151,15 +166,17 @@ export async function runHybridSearch(
     let score: number;
     const reasons: string[] = [...meta.reasons];
 
-    if (neuralHits && neuralN > 0) {
+    if (neuralPipelineOk) {
+      // Always same hybrid formula when neural path ran — neuralN may be 0 for this file
       score = Math.round(
         HYBRID_WEIGHTS.neural * neuralN +
           HYBRID_WEIGHTS.bm25 * bm25N +
           HYBRID_WEIGHTS.metadata * metaN
       );
-      reasons.unshift(`Semantic ${neuralN}`);
+      if (neuralN > 0) reasons.unshift(`Semantic ${neuralN}`);
       if (bm25N > 0) reasons.push('Content body match');
     } else {
+      // Embed not configured / failed → BM25 + metadata only
       score = content
         ? Math.round(Math.min(100, metaN + Math.min(40, content.score * 8) * 0.5))
         : metaN;
