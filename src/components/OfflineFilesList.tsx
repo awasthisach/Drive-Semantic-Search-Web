@@ -28,7 +28,7 @@ export const OfflineFilesList: React.FC<OfflineFilesListProps> = ({
       .catch(() => { if (!cancelled) setEst(null); });
     return () => { cancelled = true; };
   }, [offlineFiles.length]);
-  const usageRatio = est?.usage != null && est?.quota ? est.usage / est.quota : null;
+  const usageRatio = est?.usage != null && est?.quota && est.quota > 0 ? est.usage / est.quota : null;
 
   return (
     <div className="space-y-6">
@@ -53,7 +53,7 @@ export const OfflineFilesList: React.FC<OfflineFilesListProps> = ({
           <div className="text-left sm:text-right space-y-1">
             <p className="text-[11px] text-zinc-400 uppercase tracking-wider font-semibold">Listed size</p>
             <p className="text-base sm:text-xl font-bold text-emerald-400 font-mono">{formatBytes(totalCachedBytes)}</p>
-            {est?.usage != null && est?.quota != null && (
+            {est?.usage != null && est?.quota != null && est.quota > 0 && (
               <p className={`text-[11px] font-mono ${usageRatio != null && usageRatio > 0.8 ? 'text-amber-400' : 'text-zinc-400'}`}>
                 Browser: {formatBytes(est.usage)} / {formatBytes(est.quota)}
                 {usageRatio != null && usageRatio > 0.8 ? ' — high usage' : ''}

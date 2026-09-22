@@ -33,6 +33,16 @@ jobs:
       - name: Typecheck
         run: npm run lint
 
+      - name: Placeholder guard
+        run: |
+          if grep -rn "PLACEHOLDER" src/ --include='*.ts' --include='*.tsx'; then
+            echo "PLACEHOLDER token found in src — refusing deploy"
+            exit 1
+          fi
+          test $(wc -c < src/components/SemanticSearch.tsx) -gt 4000
+          test $(wc -c < src/components/Dashboard.tsx) -gt 4000
+          echo "Placeholder guard passed"
+
       - name: Security audit (production)
         run: npm audit --omit=dev --audit-level=high
 
