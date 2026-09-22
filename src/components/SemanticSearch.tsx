@@ -263,7 +263,7 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
         <div className="flex items-center gap-2">
           <Sparkles className="w-5 h-5 text-indigo-500" />
           <h2 className="text-sm font-bold">Hybrid search</h2>
-          <span className="text-[10px] text-zinc-500">metadata + BM25 body</span>
+          <span className="text-[10px] text-zinc-500">neural + BM25 + metadata</span>
         </div>
         <div className="flex flex-wrap gap-2">
           <div className="relative flex-1 min-w-[180px]">
