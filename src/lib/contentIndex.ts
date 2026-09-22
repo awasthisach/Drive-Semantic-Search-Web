@@ -1,6 +1,7 @@
 /**
  * Durable content index + inverted postings (browser FTS-style).
  */
+import { removeVectorsForFile } from './vectorIndex';
 const DB_NAME = 'drive-content-index';
 const DB_VERSION = 3;
 const DOC_STORE = 'documents';
@@ -176,6 +177,11 @@ export async function removeIndexedDocument(id: string): Promise<void> {
     });
   } catch (e) {
     console.warn('[contentIndex] remove failed', id, e);
+  }
+  try {
+    await removeVectorsForFile(id);
+  } catch {
+    /* ignore */
   }
 }
 
