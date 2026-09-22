@@ -22,7 +22,7 @@ export function expandTerms(query: string): string[] {
   const raw = query
     .toLowerCase()
     .split(/\s+/)
-    .map(t => t.replace(/[^\p{L}\p{N}_-]/gu, ''))
+    .map(t => t.replace(/[^\p{L}\p{M}\p{N}_-]/gu, ''))
     .filter(t => t.length >= 2);
   const out = new Set<string>(raw);
   for (const t of raw) {
