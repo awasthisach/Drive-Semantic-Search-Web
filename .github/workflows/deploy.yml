@@ -52,6 +52,8 @@ jobs:
         run: npm test
 
       - name: Build project
+        env:
+          VITE_EMBED_ENDPOINT: ${{ secrets.VITE_EMBED_ENDPOINT }}
         run: npm run build
 
       - name: Bundle size budget
