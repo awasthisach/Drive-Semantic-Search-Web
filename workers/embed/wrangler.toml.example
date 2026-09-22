@@ -2,12 +2,16 @@ name = "drive-semantic-embed"
 main = "src/index.ts"
 compatibility_date = "2024-09-01"
 
-# Secrets (set via `wrangler secret put`, never commit):
-#   GEMINI_API_KEY
-#   FIREBASE_PROJECT_ID   (e.g. thevvforg — for ID token audience check)
+# Required secrets (never commit):
+#   npx wrangler secret put GEMINI_API_KEY
+#   npx wrangler secret put FIREBASE_PROJECT_ID   # e.g. thevvforg
 
 [vars]
-EMBED_MODEL = "text-embedding-004"
+# MUST match SPA EMBED_MODEL_ID (src/lib/embeddings/config.ts)
+EMBED_MODEL = "gemini-embedding-2"
 EMBED_DIMENSION = "768"
 MAX_TEXTS = "32"
 MAX_CHARS = "8000"
+RATE_LIMIT_PER_MIN = "30"
+# Exact SPA origin (no trailing slash)
+ALLOWED_ORIGIN = "https://awasthisach.github.io"

@@ -1,6 +1,8 @@
 /**
  * Public embed client config only.
  * Never put GEMINI_API_KEY (or any secret) in VITE_* vars or the SPA bundle.
+ *
+ * Model id MUST match workers/embed EMBED_MODEL default (gemini-embedding-2).
  */
 function readEmbedEndpoint(): string {
   try {
@@ -11,14 +13,16 @@ function readEmbedEndpoint(): string {
   }
 }
 
+/** Canonical model id — keep in sync with workers/embed wrangler default. */
+export const EMBED_MODEL_ID = 'gemini-embedding-2' as const;
+export const EMBED_VERSION = '1' as const;
+export const EMBED_DIMENSION = 768 as const;
+
 export const EMBED_CONFIG = {
-  /** Serverless /embed URL (Cloudflare Worker, Cloud Function, etc.). */
   endpoint: readEmbedEndpoint(),
-  /** Logical model id — backend may map this to a concrete Gemini model. */
-  model: 'gemini-embedding-2',
-  version: '1',
-  /** Start with 768 for IDB size; verify relevance before raising. */
-  dimension: 768,
+  model: EMBED_MODEL_ID,
+  version: EMBED_VERSION,
+  dimension: EMBED_DIMENSION,
   maxTextsPerBatch: 32,
   maxCharsPerText: 8_000,
 } as const;

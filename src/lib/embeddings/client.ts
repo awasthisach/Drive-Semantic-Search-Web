@@ -95,6 +95,17 @@ export class BackendEmbeddingProvider implements EmbeddingProvider {
     if (data.embeddings.length !== cleaned.length) {
       throw new EmbedApiError(502, 'Embed response length mismatch');
     }
+    for (const row of data.embeddings) {
+      if (!Array.isArray(row) || row.length !== EMBED_CONFIG.dimension) {
+        throw new EmbedApiError(
+          502,
+          `Embed dimension mismatch (expected ${EMBED_CONFIG.dimension}, got ${Array.isArray(row) ? row.length : 0})`
+        );
+      }
+    }
+    if (data.model && data.model !== EMBED_CONFIG.model) {
+      throw new EmbedApiError(502, `Embed model mismatch (expected ${EMBED_CONFIG.model}, got ${data.model})`);
+    }
     return data.embeddings;
   }
 }
