@@ -1,8 +1,8 @@
 /**
  * Durable content index + inverted postings (browser FTS-style).
  */
-const DB_NAME = 'drive-semantic-content';
-const DB_VERSION = 2;
+const DB_NAME = 'drive-content-index';
+const DB_VERSION = 3;
 const DOC_STORE = 'documents';
 const CHUNK_STORE = 'chunks';
 const POSTING_STORE = 'postings';
@@ -10,7 +10,6 @@ const POSTING_STORE = 'postings';
 export const CHUNK_SIZE = 800;
 export const CHUNK_OVERLAP = 120;
 export const MAX_INDEX_CHARS = 500_000;
-const MAX_TERMS_PER_DOC = 8_000;
 
 export interface IndexedDocument {
   id: string;
@@ -83,7 +82,7 @@ export function chunkText(text: string): string[] {
     const end = Math.min(i + CHUNK_SIZE, cleaned.length);
     chunks.push(cleaned.slice(i, end));
     if (end >= cleaned.length) break;
-    i = Math.max(0, end - CHUNK_OVERLAP);
+    i = Math.max(end - CHUNK_OVERLAP, i + 1);
   }
   return chunks;
 }
@@ -91,7 +90,7 @@ export function chunkText(text: string): string[] {
 export function tokenize(text: string): string[] {
   return text
     .toLowerCase()
-    .split(/[^a-z0-9\u0900-\u097f]+/i)
+    .split(/[^\p{L}\p{N}_-]+/u)
     .filter(t => t.length >= 2);
 }
 
@@ -102,97 +101,76 @@ export function isDocumentStale(
   if (!existing) return true;
   if (!driveModifiedTime) return false;
   if (!existing.driveModifiedTime) return true;
-  return driveModifiedTime > existing.driveModifiedTime;
+  return existing.driveModifiedTime !== driveModifiedTime;
 }
 
-function buildPostings(fileId: string, chunks: string[]): Posting[] {
-  const map = new Map<string, { tf: number; bestChunkIdx: number; bestInChunk: number }>();
-  for (let ci = 0; ci < chunks.length; ci++) {
-    const inChunk = new Map<string, number>();
-    for (const t of tokenize(chunks[ci])) inChunk.set(t, (inChunk.get(t) || 0) + 1);
-    for (const [t, ctf] of inChunk) {
-      const prev = map.get(t);
-      if (!prev) map.set(t, { tf: ctf, bestChunkIdx: ci, bestInChunk: ctf });
-      else {
-        prev.tf += ctf;
-        if (ctf > prev.bestInChunk) {
-          prev.bestInChunk = ctf;
-          prev.bestChunkIdx = ci;
-        }
-      }
-    }
-  }
-  const postings: Posting[] = [];
-  for (const [term, v] of map) {
-    if (postings.length >= MAX_TERMS_PER_DOC) break;
-    postings.push({ id: term + '#' + fileId, term, fileId, tf: v.tf, bestChunkIdx: v.bestChunkIdx });
-  }
-  return postings;
-}
-
-export async function putIndexedDocument(
-  doc: Omit<IndexedDocument, 'charCount' | 'chunkCount' | 'indexedAt'> & { text: string }
-): Promise<IndexedDocument> {
-  const db = await openDb();
-  const truncated = doc.text.length > MAX_INDEX_CHARS || Boolean(doc.textTruncated);
-  const text = doc.text.slice(0, MAX_INDEX_CHARS);
-  const chunks = chunkText(text);
-  const record: IndexedDocument = {
+export async function putIndexedDocument(doc: {
+  id: string;
+  name: string;
+  mimeType: string;
+  text: string;
+  source: IndexedDocument['source'];
+  driveModifiedTime?: string;
+  textTruncated?: boolean;
+  corpusKey?: string;
+}): Promise<void> {
+  const chunks = chunkText(doc.text);
+  const indexed: IndexedDocument = {
     id: doc.id,
     name: doc.name,
     mimeType: doc.mimeType,
-    text: text.slice(0, 2000),
-    charCount: text.length,
+    text: doc.text,
+    charCount: doc.text.length,
     chunkCount: chunks.length,
     indexedAt: new Date().toISOString(),
     source: doc.source,
     driveModifiedTime: doc.driveModifiedTime,
-    textTruncated: truncated,
+    textTruncated: doc.textTruncated,
     corpusKey: doc.corpusKey,
   };
-  const postings = buildPostings(doc.id, chunks);
-
-  await new Promise<void>((resolve, reject) => {
-    const stores = [DOC_STORE, CHUNK_STORE];
-    if (db.objectStoreNames.contains(POSTING_STORE)) stores.push(POSTING_STORE);
-    const tx = db.transaction(stores, 'readwrite');
-    tx.objectStore(DOC_STORE).put(record);
-    const cs = tx.objectStore(CHUNK_STORE);
-    const creq = cs.index('fileId').getAllKeys(doc.id);
-    creq.onsuccess = () => {
-      for (const key of creq.result || []) cs.delete(key);
-      chunks.forEach((t, i) => cs.put({ id: doc.id + '#' + i, fileId: doc.id, idx: i, text: t } as IndexedChunk));
-    };
-    if (db.objectStoreNames.contains(POSTING_STORE)) {
-      const ps = tx.objectStore(POSTING_STORE);
-      const preq = ps.index('fileId').getAllKeys(doc.id);
-      preq.onsuccess = () => {
-        for (const key of preq.result || []) ps.delete(key);
-        for (const p of postings) ps.put(p);
-      };
+  const db = await openDb();
+  await removeIndexedDocument(doc.id);
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction([DOC_STORE, CHUNK_STORE, POSTING_STORE], 'readwrite');
+    tx.objectStore(DOC_STORE).put(indexed);
+    const termBest = new Map<string, { tf: number; chunkIdx: number }>();
+    chunks.forEach((ch, idx) => {
+      const chunkId = doc.id + '#' + idx;
+      tx.objectStore(CHUNK_STORE).put({ id: chunkId, fileId: doc.id, idx, text: ch });
+      const terms = tokenize(ch);
+      const tf = new Map<string, number>();
+      for (const term of terms) tf.set(term, (tf.get(term) || 0) + 1);
+      for (const [term, count] of tf) {
+        const prev = termBest.get(term);
+        if (!prev || count > prev.tf) termBest.set(term, { tf: count, chunkIdx: idx });
+      }
+    });
+    for (const [term, info] of termBest) {
+      tx.objectStore(POSTING_STORE).put({
+        id: term + '|' + doc.id,
+        term,
+        fileId: doc.id,
+        tf: info.tf,
+        bestChunkIdx: info.chunkIdx,
+      });
     }
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
   });
-  return record;
 }
 
 export async function removeIndexedDocument(id: string): Promise<void> {
   try {
     const db = await openDb();
+    const chunks = await getChunksForFile(id);
     await new Promise<void>((resolve, reject) => {
-      const stores = [DOC_STORE, CHUNK_STORE];
-      if (db.objectStoreNames.contains(POSTING_STORE)) stores.push(POSTING_STORE);
-      const tx = db.transaction(stores, 'readwrite');
+      const tx = db.transaction([DOC_STORE, CHUNK_STORE, POSTING_STORE], 'readwrite');
       tx.objectStore(DOC_STORE).delete(id);
-      const cs = tx.objectStore(CHUNK_STORE);
-      const req = cs.index('fileId').getAllKeys(id);
-      req.onsuccess = () => { for (const key of req.result || []) cs.delete(key); };
-      if (db.objectStoreNames.contains(POSTING_STORE)) {
-        const ps = tx.objectStore(POSTING_STORE);
-        const preq = ps.index('fileId').getAllKeys(id);
-        preq.onsuccess = () => { for (const key of preq.result || []) ps.delete(key); };
-      }
+      for (const c of chunks) tx.objectStore(CHUNK_STORE).delete(c.id);
+      const postingsReq = tx.objectStore(POSTING_STORE).index('fileId').getAllKeys(id);
+      postingsReq.onsuccess = () => {
+        for (const key of postingsReq.result || []) tx.objectStore(POSTING_STORE).delete(key);
+      };
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });
@@ -203,33 +181,20 @@ export async function removeIndexedDocument(id: string): Promise<void> {
 
 export type PruneOptions = {
   liveFileIds: Set<string>;
-  /** Only prune docs that belong to this corpus (or legacy docs with no corpusKey when matching user). */
   corpusKey?: string;
-  /**
-   * When false (truncated list / filtered type sync), do nothing.
-   * Incomplete enumerations must never delete index rows.
-   */
   complete: boolean;
 };
 
-/**
- * Remove content-index docs whose file id is not in the live set.
- * SAFETY: only runs when complete === true (full non-truncated enumeration).
- * When corpusKey is set, only docs for that corpus are considered.
- */
 export async function pruneMissingFromIndex(opts: PruneOptions | Set<string>): Promise<number> {
-  // Back-compat: bare Set was unsafe; treat as incomplete (no-op) unless complete is explicit.
   if (opts instanceof Set) {
     console.warn('[contentIndex] pruneMissingFromIndex called without { complete } — refusing to prune');
     return 0;
   }
   if (!opts.complete) return 0;
-
   const docs = await listIndexedDocuments();
   let removed = 0;
   for (const d of docs) {
     if (opts.corpusKey) {
-      // Skip docs from other corpora; legacy (no corpusKey) only match when pruning user corpus
       if (d.corpusKey && d.corpusKey !== opts.corpusKey) continue;
       if (!d.corpusKey && opts.corpusKey !== 'user') continue;
     }
@@ -241,7 +206,6 @@ export async function pruneMissingFromIndex(opts: PruneOptions | Set<string>): P
   return removed;
 }
 
-/** Targeted removal for Changes API deleted/trashed file ids (safe even when baseline incomplete). */
 export async function removeIndexedDocumentsByIds(ids: string[]): Promise<number> {
   let removed = 0;
   for (const id of ids) {
@@ -264,21 +228,32 @@ export async function getIndexedDocument(id: string): Promise<IndexedDocument | 
   }
 }
 
-export async function listIndexedDocuments(): Promise<IndexedDocument[]> {
+function matchesCorpus(d: IndexedDocument, corpusKey?: string): boolean {
+  if (!corpusKey) return true;
+  if (d.corpusKey && d.corpusKey !== corpusKey) return false;
+  if (!d.corpusKey && corpusKey !== 'user') return false;
+  return true;
+}
+
+export async function listIndexedDocuments(corpusKey?: string): Promise<IndexedDocument[]> {
   try {
     const db = await openDb();
-    return new Promise((resolve, reject) => {
+    const all: IndexedDocument[] = await new Promise((resolve, reject) => {
       const req = db.transaction(DOC_STORE, 'readonly').objectStore(DOC_STORE).getAll();
-      req.onsuccess = () => resolve(req.result || []);
+      req.onsuccess = () => resolve((req.result || []) as IndexedDocument[]);
       req.onerror = () => reject(req.error);
     });
+    if (!corpusKey) return all;
+    return all.filter(d => matchesCorpus(d, corpusKey));
   } catch {
     return [];
   }
 }
 
-/** Cheap DOC_STORE count — for IDF N without loading every document preview. */
-export async function countIndexedDocuments(): Promise<number> {
+export async function countIndexedDocuments(corpusKey?: string): Promise<number> {
+  if (corpusKey) {
+    return (await listIndexedDocuments(corpusKey)).length;
+  }
   try {
     const db = await openDb();
     return new Promise((resolve) => {
@@ -319,24 +294,32 @@ async function getPostingsForTerm(term: string): Promise<Posting[]> {
 }
 
 export async function searchContentIndex(
-  query: string
+  query: string,
+  corpusKey?: string
 ): Promise<Map<string, { score: number; snippet: string }>> {
   const terms = tokenize(query.trim().toLowerCase());
   const out = new Map<string, { score: number; snippet: string }>();
   if (!terms.length) return out;
 
-  // Parallel postings fetch; no legacy full-store scan (miss → empty; UI shows index CTA)
   const termPostings: Posting[][] = await Promise.all(terms.map(t => getPostingsForTerm(t)));
   if (!termPostings.some(p => p.length > 0)) return out;
 
+  let allowed: Set<string> | null = null;
+  if (corpusKey) {
+    allowed = new Set((await listIndexedDocuments(corpusKey)).map(d => d.id));
+  }
+
+  const filterPostings = (list: Posting[]) =>
+    allowed ? list.filter(p => allowed!.has(p.fileId)) : list;
+
   const df = new Map<string, number>();
   for (let i = 0; i < terms.length; i++) {
-    df.set(terms[i], new Set(termPostings[i].map(p => p.fileId)).size);
+    const scoped = filterPostings(termPostings[i]);
+    df.set(terms[i], new Set(scoped.map(p => p.fileId)).size);
   }
   const allFiles = new Set<string>();
-  for (const list of termPostings) for (const p of list) allFiles.add(p.fileId);
-  // IDF needs total corpus size — use count(), not getAll() of every doc preview
-  const corpusN = Math.max(await countIndexedDocuments(), allFiles.size, 1);
+  for (const list of termPostings) for (const p of filterPostings(list)) allFiles.add(p.fileId);
+  const corpusN = Math.max(await countIndexedDocuments(corpusKey), allFiles.size, 1);
   const N = Math.max(corpusN, 1);
 
   type Acc = { score: number; bestChunkIdx: number; bestTf: number };
@@ -345,7 +328,7 @@ export async function searchContentIndex(
     const term = terms[i];
     const docFreq = df.get(term) || 0;
     const idf = Math.log(1 + (N - docFreq + 0.5) / (docFreq + 0.5));
-    for (const p of termPostings[i]) {
+    for (const p of filterPostings(termPostings[i])) {
       const contrib = (p.tf * idf) / (p.tf + 1.2);
       const prev = scores.get(p.fileId);
       if (!prev) scores.set(p.fileId, { score: contrib, bestChunkIdx: p.bestChunkIdx, bestTf: p.tf });

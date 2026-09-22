@@ -49,22 +49,41 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
   const cancelIndexRef = useRef(false);
   const CURSOR_KEY = 'content-index-cursor';
 
-  /** Invalidate resume offset when corpus or extractable set size changes. */
-  const cursorSig = (corpus: string, n: number) => corpus + ':' + String(n);
-  const readCursor = (corpus: string, n: number): number => {
+  /** Deterministic set signature: corpus + sorted fileId:modifiedTime (not mere count). */
+  const buildIndexSignature = async (
+    corpus: string,
+    extractable: DriveFile[]
+  ): Promise<string> => {
+    const payload =
+      corpus +
+      '|' +
+      extractable
+        .map(f => f.id + ':' + (f.modifiedTime || ''))
+        .sort()
+        .join('|');
+    try {
+      const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(payload));
+      return Array.from(new Uint8Array(buf))
+        .map(b => b.toString(16).padStart(2, '0'))
+        .join('');
+    } catch {
+      return corpus + ':' + String(extractable.length) + ':' + payload.length;
+    }
+  };
+  const readCursor = (sig: string, n: number): number => {
     try {
       const raw = sessionStorage.getItem(CURSOR_KEY);
       if (!raw) return 0;
-      const [sig, idx] = raw.split('|');
-      if (sig !== cursorSig(corpus, n)) return 0;
+      const [storedSig, idx] = raw.split('|');
+      if (storedSig !== sig) return 0;
       return Math.max(0, Math.min(n, Number(idx) || 0));
     } catch {
       return 0;
     }
   };
-  const writeCursor = (corpus: string, n: number, i: number) => {
+  const writeCursor = (sig: string, i: number) => {
     try {
-      sessionStorage.setItem(CURSOR_KEY, cursorSig(corpus, n) + '|' + String(i));
+      sessionStorage.setItem(CURSOR_KEY, sig + '|' + String(i));
     } catch { /* ignore */ }
   };
   const clearCursor = () => {
@@ -86,9 +105,9 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
   };
 
   const refreshIndexedCount = useCallback(async () => {
-    const docs = await listIndexedDocuments();
+    const docs = await listIndexedDocuments(corpusKey);
     setIndexedCount(docs.length);
-  }, []);
+  }, [corpusKey]);
 
   useEffect(() => {
     refreshIndexedCount();
@@ -108,7 +127,7 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
     const handle = window.setTimeout(async () => {
       setSearching(true);
       try {
-        const r = await runHybridSearch(query, files, selectedCategory);
+        const r = await runHybridSearch(query, files, selectedCategory, corpusKey);
         if (!cancelled) setResults(r);
       } finally {
         if (!cancelled) setSearching(false);
@@ -118,7 +137,7 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
       cancelled = true;
       window.clearTimeout(handle);
     };
-  }, [query, files, selectedCategory]);
+  }, [query, files, selectedCategory, corpusKey]);
 
   const driveFilesCount = files.filter(f => f.isGoogleDriveItem).length;
 
@@ -146,7 +165,8 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
     let truncated = 0;
     const failedNames: string[] = [];
     const n = extractable.length;
-    let startAt = readCursor(corpusKey, n);
+    const sig = await buildIndexSignature(corpusKey, extractable);
+    let startAt = readCursor(sig, n);
     if (startAt > 0) {
       setIndexProgress(`Resuming from ${startAt + 1}/${n}\u2026`);
     }
@@ -169,7 +189,7 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
         const existing = await getIndexedDocument(f.id);
         if (!isDocumentStale(existing, f.modifiedTime)) {
           skippedFresh++;
-          writeCursor(corpusKey, extractable.length, i + 1);
+          writeCursor(sig, i + 1);
           continue;
         }
         setIndexProgress(`Indexing ${i + 1}/${extractable.length} (${pct}%): ${f.name}`);
@@ -188,7 +208,7 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
           });
           ok++;
           if (wasTrunc) truncated++;
-          writeCursor(corpusKey, extractable.length, i + 1);
+          writeCursor(sig, i + 1);
         } else {
           fail++;
           if (failedNames.length < 20) failedNames.push(f.name);

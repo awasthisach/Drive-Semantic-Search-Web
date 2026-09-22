@@ -34,13 +34,11 @@ function metadataScore(query: string, file: DriveFile): { score: number; reasons
 
   let matchedTermsCount = 0;
   for (const term of queryTerms) {
-    // Filename match always counts (N2: "report" in "Annual report.pdf")
     if (fileNameLower.includes(term)) {
       score += 25;
       matchedTermsCount++;
       continue;
     }
-    // Stopwords only suppress summary/tags boosts, not filename
     if (STOPWORDS.has(term)) continue;
     if (summaryLower.includes(term)) {
       score += 15;
@@ -52,7 +50,6 @@ function metadataScore(query: string, file: DriveFile): { score: number; reasons
   }
   if (matchedTermsCount > 0) reasons.push(`Metadata terms ${matchedTermsCount}/${queryTerms.length}`);
 
-  // N1: starred bonus only when there is already a real match
   if (file.starred && (matchedTermsCount > 0 || exactName || multiPhrase)) {
     score += 5;
     reasons.push('Starred');
@@ -63,7 +60,8 @@ function metadataScore(query: string, file: DriveFile): { score: number; reasons
 export async function runHybridSearch(
   query: string,
   files: DriveFile[],
-  filterCategory?: string
+  filterCategory?: string,
+  corpusKey?: string
 ): Promise<SemanticSearchResult[]> {
   const filtered = files.filter(file => {
     if (!filterCategory || filterCategory === 'all') return true;
@@ -80,7 +78,7 @@ export async function runHybridSearch(
     }));
   }
 
-  const contentHits = await searchContentIndex(query);
+  const contentHits = await searchContentIndex(query, corpusKey);
   const results: SemanticSearchResult[] = [];
 
   for (const file of filtered) {
