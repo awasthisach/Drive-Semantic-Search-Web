@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   HardDrive,
   Trash2,
@@ -20,6 +20,15 @@ export const OfflineFilesList: React.FC<OfflineFilesListProps> = ({
 }) => {
   const offlineFiles = files.filter(f => f.isOffline);
   const totalCachedBytes = offlineFiles.reduce((sum, f) => sum + f.size, 0);
+  const [est, setEst] = useState<{ usage?: number; quota?: number } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    navigator.storage?.estimate?.()
+      .then(e => { if (!cancelled) setEst({ usage: e.usage, quota: e.quota }); })
+      .catch(() => { if (!cancelled) setEst(null); });
+    return () => { cancelled = true; };
+  }, [offlineFiles.length]);
+  const usageRatio = est?.usage != null && est?.quota ? est.usage / est.quota : null;
 
   return (
     <div className="space-y-6">
@@ -41,9 +50,15 @@ export const OfflineFilesList: React.FC<OfflineFilesListProps> = ({
               </p>
             </div>
           </div>
-          <div className="text-left sm:text-right">
+          <div className="text-left sm:text-right space-y-1">
             <p className="text-[11px] text-zinc-400 uppercase tracking-wider font-semibold">Listed size</p>
             <p className="text-base sm:text-xl font-bold text-emerald-400 font-mono">{formatBytes(totalCachedBytes)}</p>
+            {est?.usage != null && est?.quota != null && (
+              <p className={`text-[11px] font-mono ${usageRatio != null && usageRatio > 0.8 ? 'text-amber-400' : 'text-zinc-400'}`}>
+                Browser: {formatBytes(est.usage)} / {formatBytes(est.quota)}
+                {usageRatio != null && usageRatio > 0.8 ? ' — high usage' : ''}
+              </p>
+            )}
           </div>
         </div>
       </div>
