@@ -108,9 +108,15 @@ export async function countVectors(corpusKey?: string): Promise<number> {
   return (await listVectors(corpusKey)).length;
 }
 
-export async function removeVectorsForFile(fileId: string): Promise<number> {
+export async function removeVectorsForFile(
+  fileId: string,
+  corpusKey?: string
+): Promise<number> {
   try {
-    const existing = await getVectorsForFile(fileId);
+    let existing = await getVectorsForFile(fileId);
+    if (corpusKey) {
+      existing = existing.filter(v => v.corpusKey === corpusKey);
+    }
     if (!existing.length) return 0;
     const db = await openDb();
     await new Promise<void>((resolve, reject) => {
@@ -231,17 +237,16 @@ export async function pruneMissingVectors(opts: {
 }): Promise<number> {
   if (!opts.complete) return 0;
   const all = await listVectors(opts.corpusKey);
-  let removed = 0;
+  let removedRecords = 0;
   const seen = new Set<string>();
   for (const v of all) {
     if (seen.has(v.fileId)) continue;
     if (!opts.liveFileIds.has(v.fileId)) {
-      await removeVectorsForFile(v.fileId);
+      removedRecords += await removeVectorsForFile(v.fileId, opts.corpusKey);
       seen.add(v.fileId);
-      removed++;
     }
   }
-  return removed;
+  return removedRecords;
 }
 
 export interface NeuralHit {
@@ -251,10 +256,6 @@ export interface NeuralHit {
   chunkIdx: number;
 }
 
-/**
- * Rank files by max cosine similarity of any chunk to the query vector.
- * Skips vectors with wrong model/version/dimension or empty embedding.
- */
 export function rankVectorsByQueryEmbedding(
   queryEmbedding: number[],
   vectors: VectorRecord[],
@@ -264,6 +265,7 @@ export function rankVectorsByQueryEmbedding(
     dimension?: number;
     minScore?: number;
     topK?: number;
+    liveFileIds?: Set<string>;
   }
 ): NeuralHit[] {
   const model = opts?.embeddingModel ?? EMBED_CONFIG.model;
@@ -271,6 +273,7 @@ export function rankVectorsByQueryEmbedding(
   const dimension = opts?.dimension ?? EMBED_CONFIG.dimension;
   const minScore = opts?.minScore ?? 0.25;
   const topK = opts?.topK ?? 50;
+  const live = opts?.liveFileIds;
 
   if (!queryEmbedding.length || queryEmbedding.length !== dimension) {
     return [];
@@ -278,6 +281,7 @@ export function rankVectorsByQueryEmbedding(
 
   const best = new Map<string, NeuralHit>();
   for (const v of vectors) {
+    if (live && !live.has(v.fileId)) continue;
     if (v.embeddingModel !== model) continue;
     if (v.embeddingVersion !== version) continue;
     if (v.dimension !== dimension) continue;
@@ -300,15 +304,15 @@ export function rankVectorsByQueryEmbedding(
   return [...best.values()].sort((a, b) => b.score - a.score).slice(0, topK);
 }
 
-/** Load corpus vectors and rank by query embedding. */
 export async function searchNeuralByEmbedding(
   queryEmbedding: number[],
   corpusKey: string,
-  opts?: { minScore?: number; topK?: number }
+  opts?: { minScore?: number; topK?: number; liveFileIds?: Set<string> }
 ): Promise<NeuralHit[]> {
   const vectors = await listVectors(corpusKey);
   return rankVectorsByQueryEmbedding(queryEmbedding, vectors, {
     minScore: opts?.minScore,
     topK: opts?.topK,
+    liveFileIds: opts?.liveFileIds,
   });
 }
