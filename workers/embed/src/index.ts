@@ -21,6 +21,9 @@ const DEFAULT_ORIGIN = 'https://awasthisach.github.io';
 const JWKS_URL =
   'https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com';
 
+let jwksCache: { keys: (JsonWebKey & { kid?: string })[]; fetchedAt: number } | null = null;
+const JWKS_TTL_MS = 60 * 60 * 1000;
+
 /** Per-isolate rate buckets (best-effort on CF Workers). */
 const rateBuckets = new Map<string, { count: number; resetAt: number }>();
 
@@ -68,11 +71,14 @@ function checkRateLimit(key: string, limit: number): boolean {
 }
 
 async function getJwk(kid: string): Promise<JsonWebKey | null> {
-  const res = await fetch(JWKS_URL);
-  if (!res.ok) return null;
-  const body = (await res.json()) as { keys?: (JsonWebKey & { kid?: string })[] };
-  const key = (body.keys || []).find(k => k.kid === kid);
-  return key || null;
+  const now = Date.now();
+  if (!jwksCache || now - jwksCache.fetchedAt > JWKS_TTL_MS) {
+    const res = await fetch(JWKS_URL);
+    if (!res.ok) return null;
+    const body = (await res.json()) as { keys?: (JsonWebKey & { kid?: string })[] };
+    jwksCache = { keys: body.keys || [], fetchedAt: now };
+  }
+  return jwksCache.keys.find(k => k.kid === kid) || null;
 }
 
 async function verifyFirebaseIdToken(
@@ -248,8 +254,14 @@ export default {
 
     const model = env.EMBED_MODEL || DEFAULT_MODEL;
     const dimension = Number(env.EMBED_DIMENSION || DEFAULT_DIMENSION);
-    const taskType =
-      taskRaw === 'RETRIEVAL_QUERY' ? 'RETRIEVAL_QUERY' : 'RETRIEVAL_DOCUMENT';
+    let taskType: string;
+    if (taskRaw === undefined || taskRaw === null || taskRaw === '') {
+      taskType = 'RETRIEVAL_DOCUMENT';
+    } else if (taskRaw === 'RETRIEVAL_QUERY' || taskRaw === 'RETRIEVAL_DOCUMENT') {
+      taskType = taskRaw;
+    } else {
+      return json({ error: 'invalid taskType' }, 400, corsOrigin);
+    }
 
     const result = await callGeminiEmbed(env, model, dimension, texts, taskType);
     if (!result.ok) {

@@ -11,8 +11,13 @@ import {
   getIndexedDocument,
   isDocumentStale,
   MAX_INDEX_CHARS,
+  chunkText,
 } from '../lib/contentIndex';
 import { highlightSegments } from '../lib/searchHighlight';
+import { embedAndStoreChunks } from '../lib/vectorIndex';
+import { isEmbedConfigured } from '../lib/embeddings/config';
+import { createEmbeddingProvider } from '../lib/embeddings/client';
+import { getFirebaseIdToken } from '../lib/firebaseAuth';
 
 interface SemanticSearchProps {
   files: DriveFile[];
@@ -49,7 +54,6 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
   const cancelIndexRef = useRef(false);
   const CURSOR_KEY = 'content-index-cursor';
 
-  /** Deterministic set signature: corpus + sorted fileId:modifiedTime (not mere count). */
   const buildIndexSignature = async (
     corpus: string,
     extractable: DriveFile[]
@@ -206,6 +210,21 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
             textTruncated: wasTrunc,
             corpusKey,
           });
+          if (isEmbedConfigured()) {
+            try {
+              const provider = createEmbeddingProvider(() => getFirebaseIdToken());
+              const chunks = chunkText(text.slice(0, MAX_INDEX_CHARS));
+              await embedAndStoreChunks({
+                provider,
+                fileId: f.id,
+                chunks,
+                corpusKey,
+                driveModifiedTime: f.modifiedTime,
+              });
+            } catch (ve) {
+              console.warn('[SemanticSearch] vector embed skipped', f.id, ve);
+            }
+          }
           ok++;
           if (wasTrunc) truncated++;
           writeCursor(sig, i + 1);
