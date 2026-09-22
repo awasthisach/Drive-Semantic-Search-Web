@@ -1,8 +1,9 @@
 /** Hybrid search: metadata keyword ranking + indexed document body (BM25-ish). */
 import { DriveFile, SemanticSearchResult } from '../types';
 import { searchContentIndex } from './contentIndex';
+import { expandTerms } from './queryExpand';
 
-/** Common words — block summary/tags spam only; filename matches always allowed. */
+/** Common words \u2014 block summary/tags spam only; filename matches always allowed. */
 const STOPWORDS = new Set([
   'a', 'an', 'the', 'and', 'or', 'of', 'to', 'in', 'on', 'for', 'is', 'are', 'was', 'were',
   'be', 'been', 'it', 'this', 'that', 'with', 'from', 'by', 'as', 'at', 'into', 'about',
@@ -10,7 +11,7 @@ const STOPWORDS = new Set([
 ]);
 
 function metadataScore(query: string, file: DriveFile): { score: number; reasons: string[] } {
-  const queryTerms = query.toLowerCase().split(/\s+/).filter(Boolean);
+  const queryTerms = expandTerms(query);
   let score = 0;
   const reasons: string[] = [];
   const fileNameLower = file.name.toLowerCase();
@@ -102,7 +103,7 @@ export async function runHybridSearch(
       file,
       score: Math.min(score, 100),
       matchedSnippet: content?.snippet || file.semanticSummary || file.name,
-      relevanceReason: reasons.join(' · ') || 'Match',
+      relevanceReason: reasons.join(' \u00b7 ') || 'Match',
     });
   }
 
@@ -138,7 +139,7 @@ export function runSemanticSearch(
       file,
       score: meta.score,
       matchedSnippet: file.semanticSummary || file.name,
-      relevanceReason: meta.reasons.join(' · ') || 'Keyword match',
+      relevanceReason: meta.reasons.join(' \u00b7 ') || 'Match',
     });
   }
   return results.sort((a, b) => b.score - a.score);
