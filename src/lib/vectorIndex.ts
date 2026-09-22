@@ -1,10 +1,12 @@
 /**
  * Phase 3b — IndexedDB vector store (independent of BM25 postings).
+ * Phase 4 — cosine ranking helpers.
  * Same contentHash + model + version + dimension → skip re-embed.
  * API failure must not delete existing valid vectors.
  */
 import type { EmbeddingProvider } from './embeddings/types';
 import { EMBED_CONFIG } from './embeddings/config';
+import { cosineSimilarity } from './embeddings/vector';
 
 const DB_NAME = 'drive-vector-index';
 const DB_VERSION = 1;
@@ -46,7 +48,6 @@ function openDb(): Promise<IDBDatabase> {
   });
 }
 
-/** SHA-256 hex of UTF-8 text (chunk identity). */
 export async function hashContent(text: string): Promise<string> {
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
   return Array.from(new Uint8Array(buf))
@@ -107,7 +108,6 @@ export async function countVectors(corpusKey?: string): Promise<number> {
   return (await listVectors(corpusKey)).length;
 }
 
-/** Remove all vectors for a file. Safe no-op if missing. */
 export async function removeVectorsForFile(fileId: string): Promise<number> {
   try {
     const existing = await getVectorsForFile(fileId);
@@ -126,11 +126,6 @@ export async function removeVectorsForFile(fileId: string): Promise<number> {
   }
 }
 
-/**
- * Embed chunks and store vectors. Skips chunks that already match
- * contentHash+model+version+dimension. On embed API failure, existing
- * compatible vectors for that file are left intact (no partial wipe).
- */
 export async function embedAndStoreChunks(opts: {
   provider: EmbeddingProvider;
   fileId: string;
@@ -229,7 +224,6 @@ export async function embedAndStoreChunks(opts: {
   }
 }
 
-/** Prune vectors whose fileId is not in live set (corpus-scoped). */
 export async function pruneMissingVectors(opts: {
   liveFileIds: Set<string>;
   corpusKey?: string;
@@ -248,4 +242,73 @@ export async function pruneMissingVectors(opts: {
     }
   }
   return removed;
+}
+
+export interface NeuralHit {
+  fileId: string;
+  score: number;
+  snippet: string;
+  chunkIdx: number;
+}
+
+/**
+ * Rank files by max cosine similarity of any chunk to the query vector.
+ * Skips vectors with wrong model/version/dimension or empty embedding.
+ */
+export function rankVectorsByQueryEmbedding(
+  queryEmbedding: number[],
+  vectors: VectorRecord[],
+  opts?: {
+    embeddingModel?: string;
+    embeddingVersion?: string;
+    dimension?: number;
+    minScore?: number;
+    topK?: number;
+  }
+): NeuralHit[] {
+  const model = opts?.embeddingModel ?? EMBED_CONFIG.model;
+  const version = opts?.embeddingVersion ?? EMBED_CONFIG.version;
+  const dimension = opts?.dimension ?? EMBED_CONFIG.dimension;
+  const minScore = opts?.minScore ?? 0.25;
+  const topK = opts?.topK ?? 50;
+
+  if (!queryEmbedding.length || queryEmbedding.length !== dimension) {
+    return [];
+  }
+
+  const best = new Map<string, NeuralHit>();
+  for (const v of vectors) {
+    if (v.embeddingModel !== model) continue;
+    if (v.embeddingVersion !== version) continue;
+    if (v.dimension !== dimension) continue;
+    if (!Array.isArray(v.embedding) || v.embedding.length !== dimension) continue;
+
+    const sim = cosineSimilarity(queryEmbedding, v.embedding);
+    if (sim < minScore) continue;
+
+    const prev = best.get(v.fileId);
+    if (!prev || sim > prev.score) {
+      best.set(v.fileId, {
+        fileId: v.fileId,
+        score: sim,
+        snippet: (v.text || '').slice(0, 160).trim(),
+        chunkIdx: v.idx,
+      });
+    }
+  }
+
+  return [...best.values()].sort((a, b) => b.score - a.score).slice(0, topK);
+}
+
+/** Load corpus vectors and rank by query embedding. */
+export async function searchNeuralByEmbedding(
+  queryEmbedding: number[],
+  corpusKey: string,
+  opts?: { minScore?: number; topK?: number }
+): Promise<NeuralHit[]> {
+  const vectors = await listVectors(corpusKey);
+  return rankVectorsByQueryEmbedding(queryEmbedding, vectors, {
+    minScore: opts?.minScore,
+    topK: opts?.topK,
+  });
 }
