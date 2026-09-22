@@ -29,8 +29,8 @@ export class EmbedApiError extends Error {
  * API keys never live in the browser — only a Firebase ID token is sent.
  */
 export class BackendEmbeddingProvider implements EmbeddingProvider {
-  readonly model = EMBED_CONFIG.model;
-  readonly version = EMBED_CONFIG.version;
+  readonly embeddingModel = EMBED_CONFIG.model;
+  readonly embeddingVersion = EMBED_CONFIG.version;
   readonly dimension = EMBED_CONFIG.dimension;
 
   constructor(private readonly getIdToken: () => Promise<string | null>) {}
