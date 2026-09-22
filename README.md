@@ -45,12 +45,22 @@ Runs `lint` + `test` + `build` before every push. Enable GitHub branch protectio
 
 ## Honest limits
 
-- Not neural / vector embeddings
-- No PDF binary OCR
+- Not neural / vector embeddings **in the live ranking path yet** (Phase 2–3 scaffold only)
+- No PDF binary OCR in browser
 - Filtered type syncs use full list; incremental only for type = **all**
 - Broad `drive` OAuth scope; access token in `sessionStorage` (see [SECURITY.md](SECURITY.md))
 - List pagination capped (~20k) with truncation banner
 - Missing size → **Size unknown** (never invented)
+
+## Neural embeddings (Phase 2–3 scaffold)
+
+Not enabled by default. Architecture:
+
+1. `src/lib/embeddings/` — `EmbeddingProvider` contract + browser client (Firebase ID token only)
+2. `workers/embed/` — Cloudflare Worker proxies Gemini; `GEMINI_API_KEY` is a Worker secret
+3. Set `VITE_EMBED_ENDPOINT` to the Worker URL after deploy
+
+Search ranking remains BM25/metadata until Phase 4 wires cosine retrieval.
 
 ## Resilience
 
