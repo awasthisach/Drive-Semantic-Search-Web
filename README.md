@@ -9,13 +9,13 @@ Client-side web app for Google Drive: sync, hybrid keyword search, offline pin, 
 - **Google Drive** — OAuth (GIS/Firebase), My Drive / All drives / Shared Drive, type filters, upload, trash, move, folders, star
 - **Token lifecycle** — expiry, silent refresh, revoke on sign-out; `withDriveAuthRetry` on mutations
 - **Incremental sync** — Drive Changes API; full list seeds page token; delta Sync Now when type filter = all
-- **Search** — hybrid metadata + inverted postings (BM25). Highlight chips + match reasons. Inline Star / Pin offline / Copy link on results
-- **Content index** — IndexedDB docs/chunks/postings; stale detection via `driveModifiedTime`; 500k body cap; cancel + progress UI
+- **Search** — hybrid metadata + inverted postings (BM25). Highlight chips + match reasons. Inline Star / Pin offline / Copy link on results. Hindi/Hinglish query expansion (lightweight pairs)
+- **Content index** — IndexedDB docs/chunks/postings; stale detection; cancel + progress; **resume cursor** after interrupt
 - **Select all visible** — pagination-aware (current page only)
-- **Offline pin** — binary or native export → IndexedDB (true LRU, ~200 MB / 80 entries) + SHA-256
+- **Offline pin** — IndexedDB LRU + SHA-256; browser storage quota shown on Offline tab
 - **Vault** — PBKDF2 310k + AES-GCM (Worker + main-thread fallback)
 - **Duplicates** — size+name candidates; trash locked until SHA-256 verify; durable hash snapshot
-- **Local diagnostics** — ring buffer for errors/sync/search; export JSON (tokens redacted, no telemetry)
+- **Local diagnostics** — ring buffer; header **Diagnostics** export (tokens redacted)
 - **PWA** — Vite PWA shell, installable
 
 ## Stack
@@ -34,6 +34,14 @@ npm run check:bundle
 ```
 
 **CI:** `npm ci` → lint → audit → test → build → GitHub Pages.
+
+## Local pre-push (optional)
+
+```bash
+git config core.hooksPath .githooks
+```
+
+Runs `lint` + `test` + `build` before every push. Enable GitHub branch protection: require Deploy workflow checks on `main`.
 
 ## Honest limits
 
