@@ -49,6 +49,28 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
   const cancelIndexRef = useRef(false);
   const CURSOR_KEY = 'content-index-cursor';
 
+  /** Invalidate resume offset when corpus or extractable set size changes. */
+  const cursorSig = (corpus: string, n: number) => corpus + ':' + String(n);
+  const readCursor = (corpus: string, n: number): number => {
+    try {
+      const raw = sessionStorage.getItem(CURSOR_KEY);
+      if (!raw) return 0;
+      const [sig, idx] = raw.split('|');
+      if (sig !== cursorSig(corpus, n)) return 0;
+      return Math.max(0, Math.min(n, Number(idx) || 0));
+    } catch {
+      return 0;
+    }
+  };
+  const writeCursor = (corpus: string, n: number, i: number) => {
+    try {
+      sessionStorage.setItem(CURSOR_KEY, cursorSig(corpus, n) + '|' + String(i));
+    } catch { /* ignore */ }
+  };
+  const clearCursor = () => {
+    try { sessionStorage.removeItem(CURSOR_KEY); } catch { /* ignore */ }
+  };
+
   const copyLink = async (file: DriveFile) => {
     const link =
       file.webViewLink ||
@@ -71,7 +93,13 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
   useEffect(() => {
     refreshIndexedCount();
     try {
-      setResumeFrom(Number(sessionStorage.getItem(CURSOR_KEY) || 0) || 0);
+      const raw = sessionStorage.getItem(CURSOR_KEY);
+      if (!raw) setResumeFrom(0);
+      else {
+        const parts = raw.split('|');
+        const idx = Number(parts[1] || 0) || 0;
+        setResumeFrom(idx);
+      }
     } catch { setResumeFrom(0); }
   }, [refreshIndexedCount]);
 
@@ -117,12 +145,10 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
     let skippedFresh = 0;
     let truncated = 0;
     const failedNames: string[] = [];
-    let startAt = 0;
-    try {
-      startAt = Math.max(0, Math.min(extractable.length, Number(sessionStorage.getItem(CURSOR_KEY) || 0) || 0));
-    } catch { startAt = 0; }
+    const n = extractable.length;
+    let startAt = readCursor(corpusKey, n);
     if (startAt > 0) {
-      setIndexProgress(`Resuming from ${startAt + 1}/${extractable.length}\u2026`);
+      setIndexProgress(`Resuming from ${startAt + 1}/${n}\u2026`);
     }
 
     for (let i = startAt; i < extractable.length; i++) {
@@ -143,7 +169,7 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
         const existing = await getIndexedDocument(f.id);
         if (!isDocumentStale(existing, f.modifiedTime)) {
           skippedFresh++;
-          try { sessionStorage.setItem(CURSOR_KEY, String(i + 1)); } catch { /* ignore */ }
+          writeCursor(corpusKey, extractable.length, i + 1);
           continue;
         }
         setIndexProgress(`Indexing ${i + 1}/${extractable.length} (${pct}%): ${f.name}`);
@@ -162,7 +188,7 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
           });
           ok++;
           if (wasTrunc) truncated++;
-          try { sessionStorage.setItem(CURSOR_KEY, String(i + 1)); } catch { /* ignore */ }
+          writeCursor(corpusKey, extractable.length, i + 1);
         } else {
           fail++;
           if (failedNames.length < 20) failedNames.push(f.name);
@@ -175,7 +201,7 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
     }
 
     if (!cancelIndexRef.current) {
-      try { sessionStorage.removeItem(CURSOR_KEY); } catch { /* ignore */ }
+      clearCursor();
       setIndexProgress(
         `Done: ${ok} indexed, ${skippedFresh} already fresh, ${fail} failed` +
           (truncated ? `, ${truncated} truncated` : '') +
@@ -186,7 +212,8 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
     }
     setIndexing(false);
     try {
-      setResumeFrom(Number(sessionStorage.getItem(CURSOR_KEY) || 0) || 0);
+      const raw = sessionStorage.getItem(CURSOR_KEY);
+      setResumeFrom(raw ? (Number(raw.split('|')[1] || 0) || 0) : 0);
     } catch { setResumeFrom(0); }
     await refreshIndexedCount();
   };
