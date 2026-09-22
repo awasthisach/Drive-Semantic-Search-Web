@@ -1,31 +1,39 @@
-# Embed worker (Phase 3)
+# Embed worker (Phase 3 hardened)
 
-Authenticated proxy: browser sends **Firebase ID token** only; **GEMINI_API_KEY** stays in Worker secrets.
+Browser sends **Firebase ID token** only. **GEMINI_API_KEY** is a Worker secret.
 
-## Deploy (Cloudflare)
+## Security (production)
+
+| Control | Status |
+|---------|--------|
+| API key server-side only | required |
+| Firebase JWT **signature** via Google JWKS | required |
+| `FIREBASE_PROJECT_ID` mandatory (fail closed) | required |
+| CORS exact Pages origin | `ALLOWED_ORIGIN` |
+| Per-uid rate limit | `RATE_LIMIT_PER_MIN` (default 30/min) |
+| Upstream retry 429/5xx | 3 attempts, exponential backoff |
+| Strict text validation | string-only, non-empty, max length |
+| Response dimension check | must match `EMBED_DIMENSION` |
+| Model id aligned with SPA | `gemini-embedding-2` |
+
+## Deploy
 
 ```bash
 cd workers/embed
 cp wrangler.toml.example wrangler.toml
 npx wrangler secret put GEMINI_API_KEY
-npx wrangler secret put FIREBASE_PROJECT_ID   # e.g. thevvforg
+npx wrangler secret put FIREBASE_PROJECT_ID
 npx wrangler deploy
 ```
 
-Set SPA env (public URL only):
+SPA:
 
 ```bash
-# .env.local (not committed)
-VITE_EMBED_ENDPOINT=https://drive-semantic-embed.<your-subdomain>.workers.dev
+VITE_EMBED_ENDPOINT=https://drive-semantic-embed.<subdomain>.workers.dev
 ```
 
-## Security checklist
+## Not yet (Phase 3b / 4)
 
-- [ ] GEMINI_API_KEY never in `VITE_*` or frontend source
-- [ ] Production: replace JWT payload parse with full JWKS signature verify
-- [ ] Restrict CORS `Access-Control-Allow-Origin` to your Pages origin
-- [ ] No request body text written to logs
-
-## Not wired yet
-
-Phase 4 will call `createEmbeddingProvider()` from indexing + search.
+- IndexedDB vector store
+- Cosine search wiring
+- Durable Object rate limits (cross-isolate)
