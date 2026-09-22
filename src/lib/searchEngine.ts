@@ -1,9 +1,22 @@
-/** Hybrid search: metadata keyword ranking + indexed document body (BM25-ish). */
+/**
+ * Hybrid search: neural cosine (optional) + BM25 body + metadata keywords.
+ * Weights are PROVISIONAL — tune with real eval corpus (Phase 5/11).
+ */
 import { DriveFile, SemanticSearchResult } from '../types';
 import { searchContentIndex } from './contentIndex';
 import { expandTerms } from './queryExpand';
+import { isEmbedConfigured } from './embeddings/config';
+import { createEmbeddingProvider } from './embeddings/client';
+import { getFirebaseIdToken } from './firebaseAuth';
+import { searchNeuralByEmbedding } from './vectorIndex';
 
-/** Common words \u2014 block summary/tags spam only; filename matches always allowed. */
+/** Provisional hybrid weights (must sum ~1). Not final without eval. */
+export const HYBRID_WEIGHTS = {
+  neural: 0.55,
+  bm25: 0.25,
+  metadata: 0.2,
+} as const;
+
 const STOPWORDS = new Set([
   'a', 'an', 'the', 'and', 'or', 'of', 'to', 'in', 'on', 'for', 'is', 'are', 'was', 'were',
   'be', 'been', 'it', 'this', 'that', 'with', 'from', 'by', 'as', 'at', 'into', 'about',
@@ -57,6 +70,35 @@ function metadataScore(query: string, file: DriveFile): { score: number; reasons
   return { score: Math.min(score, 100), reasons };
 }
 
+/** Map cosine [-1,1] → [0,100] for hybrid blend (negative treated as 0). */
+export function neuralToDisplayScore(cosine: number): number {
+  return Math.round(Math.max(0, Math.min(1, cosine)) * 100);
+}
+
+async function tryNeuralSearch(
+  query: string,
+  corpusKey?: string
+): Promise<Map<string, { score: number; snippet: string }> | null> {
+  if (!isEmbedConfigured() || !corpusKey || !query.trim()) return null;
+  try {
+    const provider = createEmbeddingProvider(() => getFirebaseIdToken());
+    const qVec = await provider.embedQuery(query.trim());
+    if (!qVec.length) return null;
+    const hits = await searchNeuralByEmbedding(qVec, corpusKey, {
+      minScore: 0.22,
+      topK: 80,
+    });
+    const out = new Map<string, { score: number; snippet: string }>();
+    for (const h of hits) {
+      out.set(h.fileId, { score: h.score, snippet: h.snippet });
+    }
+    return out;
+  } catch (e) {
+    console.warn('[searchEngine] neural search failed; BM25/metadata only', e);
+    return null;
+  }
+}
+
 export async function runHybridSearch(
   query: string,
   files: DriveFile[],
@@ -78,21 +120,50 @@ export async function runHybridSearch(
     }));
   }
 
-  const contentHits = await searchContentIndex(query, corpusKey);
-  const results: SemanticSearchResult[] = [];
+  const [contentHits, neuralHits] = await Promise.all([
+    searchContentIndex(query, corpusKey),
+    tryNeuralSearch(query, corpusKey),
+  ]);
 
-  for (const file of filtered) {
+  const results: SemanticSearchResult[] = [];
+  const fileById = new Map(filtered.map(f => [f.id, f]));
+
+  const candidateIds = new Set<string>();
+  for (const f of filtered) candidateIds.add(f.id);
+  for (const id of contentHits.keys()) candidateIds.add(id);
+  if (neuralHits) for (const id of neuralHits.keys()) candidateIds.add(id);
+
+  for (const id of candidateIds) {
+    const file = fileById.get(id);
+    if (!file) continue;
+
     const meta = metadataScore(query, file);
     const content = contentHits.get(file.id);
-    const contentScore = content ? Math.min(40, content.score * 8) : 0;
+    const neural = neuralHits?.get(file.id);
+
+    const metaN = meta.score;
+    const bm25N = content ? Math.min(100, content.score * 12) : 0;
+    const neuralN = neural ? neuralToDisplayScore(neural.score) : 0;
+
+    const hasAny = metaN > 0 || bm25N > 0 || neuralN > 0;
+    if (!hasAny) continue;
 
     let score: number;
-    const reasons = [...meta.reasons];
-    if (contentScore > 0) {
-      score = Math.round(Math.min(100, meta.score + contentScore * 0.5));
-      reasons.push('Content body match');
+    const reasons: string[] = [...meta.reasons];
+
+    if (neuralHits && neuralN > 0) {
+      score = Math.round(
+        HYBRID_WEIGHTS.neural * neuralN +
+          HYBRID_WEIGHTS.bm25 * bm25N +
+          HYBRID_WEIGHTS.metadata * metaN
+      );
+      reasons.unshift(`Semantic ${neuralN}`);
+      if (bm25N > 0) reasons.push('Content body match');
     } else {
-      score = meta.score;
+      score = content
+        ? Math.round(Math.min(100, metaN + Math.min(40, content.score * 8) * 0.5))
+        : metaN;
+      if (content) reasons.push('Content body match');
     }
 
     if (score <= 0) continue;
@@ -100,8 +171,9 @@ export async function runHybridSearch(
     results.push({
       file,
       score: Math.min(score, 100),
-      matchedSnippet: content?.snippet || file.semanticSummary || file.name,
-      relevanceReason: reasons.join(' \u00b7 ') || 'Match',
+      matchedSnippet:
+        neural?.snippet || content?.snippet || file.semanticSummary || file.name,
+      relevanceReason: reasons.join(' · ') || 'Match',
     });
   }
 
@@ -137,7 +209,7 @@ export function runSemanticSearch(
       file,
       score: meta.score,
       matchedSnippet: file.semanticSummary || file.name,
-      relevanceReason: meta.reasons.join(' \u00b7 ') || 'Match',
+      relevanceReason: meta.reasons.join(' · ') || 'Match',
     });
   }
   return results.sort((a, b) => b.score - a.score);
