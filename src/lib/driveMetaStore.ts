@@ -33,11 +33,11 @@ function tokenKey(corpus: string, sharedDriveId?: string): string {
 function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     if (typeof indexedDB === 'undefined') {
-      reject(new Error('IndexedDB unavailable'));
+      reject(new Error('IndexedDB not available'));
       return;
     }
     const req = indexedDB.open(DB_NAME, DB_VERSION);
-    req.onerror = () => reject(req.error);
+    req.onerror = () => reject(req.error || new Error('meta db open failed'));
     req.onsuccess = () => resolve(req.result);
     req.onupgradeneeded = () => {
       const db = req.result;
@@ -92,9 +92,15 @@ export async function loadDriveMetaSnapshot(
           resolve(req.result);
           return;
         }
-        const legacy = tx.objectStore(STORE).get('latest');
-        legacy.onsuccess = () => resolve(legacy.result || null);
-        legacy.onerror = () => resolve(null);
+        // Only fall back to "latest" for legacy/no-corpus callers.
+        // Explicit corpus request must not leak another corpus's snapshot.
+        if (corpus === undefined) {
+          const legacy = tx.objectStore(STORE).get('latest');
+          legacy.onsuccess = () => resolve(legacy.result || null);
+          legacy.onerror = () => resolve(null);
+          return;
+        }
+        resolve(null);
       };
       req.onerror = () => reject(req.error);
     });
@@ -129,8 +135,7 @@ export async function loadChangesPageToken(
     if (!db.objectStoreNames.contains(TOKEN_STORE)) return null;
     const key = tokenKey(corpus, sharedDriveId);
     return new Promise((resolve, reject) => {
-      const tx = db.transaction(TOKEN_STORE, 'readonly');
-      const req = tx.objectStore(TOKEN_STORE).get(key);
+      const req = db.transaction(TOKEN_STORE, 'readonly').objectStore(TOKEN_STORE).get(key);
       req.onsuccess = () => resolve(req.result?.pageToken || null);
       req.onerror = () => reject(req.error);
     });
@@ -147,7 +152,7 @@ export async function clearChangesPageToken(
     const db = await openDb();
     if (!db.objectStoreNames.contains(TOKEN_STORE)) return;
     const key = tokenKey(corpus, sharedDriveId);
-    await new Promise<void>((resolve, reject) => {
+    return new Promise((resolve, reject) => {
       const tx = db.transaction(TOKEN_STORE, 'readwrite');
       tx.objectStore(TOKEN_STORE).delete(key);
       tx.oncomplete = () => resolve();
