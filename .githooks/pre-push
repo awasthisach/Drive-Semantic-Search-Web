@@ -1,0 +1,6 @@
+#!/bin/sh
+# Local safety net before pushing to origin (branch protection should also require CI).
+set -e
+npm run lint
+npm test
+npm run build
