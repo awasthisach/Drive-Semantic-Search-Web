@@ -5,6 +5,7 @@ import { OfflineIndicator } from './components/OfflineIndicator';
 import { MoveToFolderModal } from './components/MoveToFolderModal';
 import { AuthErrorModal } from './components/AuthErrorModal';
 import { useDriveApp } from './hooks/useDriveApp';
+import { downloadDiagnostics } from './lib/diagnostics';
 
 const DeviceStorageScanner = React.lazy(() =>
   import('./components/DeviceStorageScanner').then(m => ({ default: m.DeviceStorageScanner }))
@@ -60,6 +61,7 @@ export default function App() {
         </div>
         <div className="flex items-center gap-2">
           <span className="text-[10px] font-semibold px-2 py-1 rounded-full border border-zinc-200 dark:border-zinc-700">{syncStats.status}</span>
+          <button type="button" onClick={downloadDiagnostics} className="text-xs px-2 py-1 rounded-lg border border-zinc-200 dark:border-zinc-700" title="Export local diagnostics JSON (tokens redacted)">Diagnostics</button>
           {isGoogleConnected ? (
             <button type="button" onClick={handleGoogleSignOut} className="text-xs px-2 py-1 rounded-lg border border-zinc-200 dark:border-zinc-700">Sign out</button>
           ) : null}
