@@ -53,7 +53,7 @@ jobs:
 
       - name: Build project
         env:
-          VITE_EMBED_ENDPOINT: ${{ secrets.VITE_EMBED_ENDPOINT }}
+          VITE_EMBED_ENDPOINT: ${{ secrets.VITE_EMBED_ENDPOINT || 'https://drive-semantic-embed.awasthi-sach.workers.dev' }}
         run: npm run build
 
       - name: Bundle size budget
