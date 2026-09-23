@@ -4,13 +4,18 @@
  *
  * Model id MUST match workers/embed EMBED_MODEL default (gemini-embedding-2).
  */
+const DEFAULT_PRODUCTION_EMBED_ENDPOINT =
+  'https://drive-semantic-embed.awasthi-sach.workers.dev';
+
 function readEmbedEndpoint(): string {
   try {
     const env = (import.meta as unknown as { env?: Record<string, string> }).env;
-    return (env && env.VITE_EMBED_ENDPOINT) || '';
+    const fromEnv = (env && env.VITE_EMBED_ENDPOINT) || '';
+    if (fromEnv.startsWith('http')) return fromEnv.replace(/\/$/, '');
   } catch {
-    return '';
+    /* ignore */
   }
+  return DEFAULT_PRODUCTION_EMBED_ENDPOINT;
 }
 
 /** Canonical model id — keep in sync with workers/embed wrangler default. */

@@ -4,7 +4,9 @@ Client-side web app for Google Drive: sync, **hybrid search** (neural cosine + B
 
 **Live:** https://awasthisach.github.io/Drive-Semantic-Search-Web/
 
-**HEAD notes:** Search code supports neural retrieval when an embed Worker is configured. Without `VITE_EMBED_ENDPOINT`, the live site runs **BM25 + metadata only**.
+**Embed Worker:** https://drive-semantic-embed.awasthi-sach.workers.dev
+
+**HEAD notes:** Search uses neural retrieval when the Worker is reachable and vectors are indexed. If the Worker is down, search falls back to **BM25 + metadata**.
 
 ---
 
@@ -62,16 +64,16 @@ Runs `lint` + `test` + `build` before every push. Prefer branch protection requi
 
 ```
 Google Drive
-     │
-     ▼
+     |
+     v
 Incremental extract / index
-     │
-     ├──────────────┬──────────────┐
-     ▼              ▼              ▼
+     |
+     +--------------+--------------+
+     v              v              v
  Metadata      BM25 index     Vector index (768-d)
-     │              │              │
-     └──────────────┼──────────────┘
-                    ▼
+     |              |              |
+     +--------------+--------------+
+                    v
               Hybrid ranking
      (provisional weights — see below)
 ```
@@ -80,7 +82,7 @@ Incremental extract / index
 |--------|-------------|
 | Metadata | Always |
 | BM25 body | After “Index extractable content” |
-| Neural cosine | `VITE_EMBED_ENDPOINT` set **and** vectors stored during index |
+| Neural cosine | Worker reachable **and** vectors stored during index |
 
 **Provisional hybrid weights** (code: `HYBRID_WEIGHTS` in `src/lib/searchEngine.ts`):
 
@@ -98,53 +100,34 @@ If the embed pipeline fails or is not configured, search **falls back** to BM25 
 
 ## Enable neural search (ops)
 
-Neural ranking is **code-complete** but **off** on Pages until the Worker URL is baked into the SPA build.
+Production Worker URL (public, not a secret):
 
-### 1. Deploy embed Worker
+`https://drive-semantic-embed.awasthi-sach.workers.dev`
 
-```bash
-cd workers/embed
-cp wrangler.toml.example wrangler.toml
-npx wrangler secret put GEMINI_API_KEY
-npx wrangler secret put FIREBASE_PROJECT_ID   # e.g. thevvforg
-npx wrangler deploy
-```
+The SPA defaults to this URL. CI uses repository secret `VITE_EMBED_ENDPOINT` when set, otherwise the same default.
 
-Worker expects Firebase ID token (JWKS-verified), exact CORS origin, rate limit, retry/backoff. Model: **`gemini-embedding-2`**, dimension **768** (must match SPA).
+Worker must run **`workers/embed/src/index.ts`** (JSON `{ embeddings, model, version, dimension }`). A dashboard stub that returns plain `Unauthorized` will not work.
 
-### 2. Point the SPA at the Worker
+Required Worker secrets/vars:
 
-Build-time env (must start with `http`):
+- Secret `GEMINI_API_KEY`
+- Variable or secret `FIREBASE_PROJECT_ID=thevvforg`
+- CORS origin default: `https://awasthisach.github.io`
+- Model `gemini-embedding-2`, dimension `768`
 
-```bash
-VITE_EMBED_ENDPOINT=https://<your-worker>.workers.dev
-```
+After Worker + Pages are aligned:
 
-For GitHub Pages CI, add a repository secret `VITE_EMBED_ENDPOINT` and pass it into the build step in `.github/workflows/deploy.yml`:
+1. Sign in on the live app
+2. **Index extractable content** (writes BM25 + vectors)
+3. Query cross-language cases (e.g. `बेरोजगारी` vs English “employment / joblessness” docs)
+4. Confirm exact filename still ranks; embed downtime still returns BM25 results
 
-```yaml
-- name: Build project
-  env:
-    VITE_EMBED_ENDPOINT: ${{ secrets.VITE_EMBED_ENDPOINT }}
-  run: npm run build
-```
-
-Without this, `isEmbedConfigured()` is false → neural path stays disabled.
-
-### 3. Index + verify
-
-1. Sign in on the live app  
-2. **Index extractable content** (writes BM25 + vectors when endpoint is set)  
-3. Query cross-language cases (e.g. `बेरोजगारी` vs English “employment / joblessness” docs)  
-4. Confirm exact filename still ranks; embed downtime still returns BM25 results  
-
-**Live multilingual proof cannot be claimed from unit tests alone** — those only verify cosine/ranking math with synthetic vectors.
+**Live multilingual proof cannot be claimed from unit tests alone.**
 
 ---
 
 ## Honest limits
 
-- Live neural requires Worker + `VITE_EMBED_ENDPOINT` + re-index; default Pages build may be BM25-only
 - Hybrid weights are **provisional** until eval on real Gemini embeddings
 - Vector search loads corpus vectors from IndexedDB (`getAll`) — fine for small/medium corpora; large Drive may need later indexing/ANN work
 - No full PDF/DOCX/OCR pipeline in browser yet (text extraction where Drive/export supports it)
