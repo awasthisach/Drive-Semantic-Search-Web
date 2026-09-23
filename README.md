@@ -169,4 +169,5 @@ Without this, `isEmbedConfigured()` is false → neural path stays disabled.
 
 - **Never** put `GEMINI_API_KEY` in `VITE_*` or the SPA bundle
 - Browser sends Firebase **ID token** only to the Worker
-- See [SECURITY.md](SECURITY.md). Report vulnerabilities via private GitHub advisory.
+- See [SECURITY.md](SECURITY.md). Report vulnerabilities via private GitHub advisory. 
+ 
