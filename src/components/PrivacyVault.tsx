@@ -27,12 +27,29 @@ export const PrivacyVault: React.FC<PrivacyVaultProps> = ({
   const [previewFile, setPreviewFile] = useState<{ name: string; content: string } | null>(null);
   const [decryptingId, setDecryptingId] = useState<string | null>(null);
 
-  const handleUnlock = (e: React.FormEvent) => {
+  const handleUnlock = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputPass || inputPass.length < 8) {
       setErrorMsg('Passphrase must be at least 8 characters');
       return;
     }
+
+    // Existing vaults must be verified before opening. A fresh vault has no
+    // verifier yet, so the first passphrase becomes its passphrase.
+    if (vaultFiles.length > 0) {
+      try {
+        await decryptDataWithWorker(
+          vaultFiles[0].encryptedData,
+          vaultFiles[0].iv,
+          vaultFiles[0].salt,
+          inputPass
+        );
+      } catch {
+        setErrorMsg('Incorrect vault passphrase or damaged vault item');
+        return;
+      }
+    }
+
     setPassphrase(inputPass);
     setIsUnlocked(true);
     setErrorMsg('');
