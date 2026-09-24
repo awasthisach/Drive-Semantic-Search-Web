@@ -36,7 +36,7 @@ npm run check
 npm run deploy
 ```
 
-The repository’s `.github/workflows/deploy-worker.yml` performs the dry run and deployment on changes under `workers/embed/**` or through manual dispatch. It requires the GitHub Actions secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`; values are never committed or printed.
+The main deployment workflow performs the Worker dry run, deploys the Worker, and runs an authenticated live contract check before GitHub Pages deployment. It requires the GitHub Actions secrets `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, and `FIREBASE_TEST_ID_TOKEN`; values are never committed or printed. The separate `.github/workflows/deploy-worker.yml` is manual-only to prevent a second automatic Worker deployment racing the ordered main workflow.
 
 ## SPA integration
 
@@ -46,7 +46,7 @@ The production endpoint is:
 https://drive-semantic-embed.awasthi-sach.workers.dev
 ```
 
-The Pages workflow injects `VITE_EMBED_ENDPOINT`, defaulting to that endpoint. The SPA’s CSP permits only this exact Worker origin. After changing the embedding model, retrieval instructions, dimension, or compatibility version, re-index extractable Drive content so all current vectors are regenerated.
+The Pages workflow injects `VITE_EMBED_ENDPOINT`, defaulting to that endpoint. The SPA’s CSP permits only this exact Worker origin. Production rollout is intentionally ordered as Worker deploy → authenticated contract verification → Pages deploy. After changing the embedding model, retrieval instructions, dimension, or compatibility version, re-index extractable Drive content so all current vectors are regenerated.
 
 ## Limitations
 
