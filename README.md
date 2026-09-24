@@ -18,7 +18,7 @@ Client-side web app for Google Drive: sync, **hybrid search** (neural cosine + B
 - **Hybrid search**
   - **Metadata** — filename, summary, tags (exact name boost)
   - **BM25 body** — IndexedDB postings over extracted Drive text
-  - **Neural (optional)** — Gemini Embedding 2 (768 dimensions, compatibility version 2) via authenticated Worker → cosine over chunk vectors → hybrid blend
+  - **Neural (optional)** — Gemini Embedding 2 (768 dimensions, compatibility version 3) via authenticated Worker → cosine over chunk vectors → hybrid blend
   - Highlight chips, match reasons, Star / Pin offline / Copy link on results
   - Hindi/Hinglish query expansion (lightweight pairs; preserves Devanagari combining marks)
 - **Content + vector index** — IndexedDB BM25 docs/chunks/postings **and** separate vector store; content-hash skip re-embed; cancel + progress; **resume cursor** (SHA-256 signature of corpus file list)
@@ -113,7 +113,7 @@ Required Worker secrets/vars:
 - Secret `GEMINI_API_KEY`
 - Variable or secret `FIREBASE_PROJECT_ID=thevvforg`
 - CORS origin default: `https://awasthisach.github.io`
-- Model `gemini-embedding-2`, dimension `768`, embedding compatibility version `2`
+- Model `gemini-embedding-2`, dimension `768`, embedding compatibility version `3`
 
 After Worker + Pages are aligned:
 

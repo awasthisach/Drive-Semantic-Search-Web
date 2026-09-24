@@ -4,6 +4,8 @@ import { Dashboard } from './components/Dashboard';
 import { OfflineIndicator } from './components/OfflineIndicator';
 import { MoveToFolderModal } from './components/MoveToFolderModal';
 import { AuthErrorModal } from './components/AuthErrorModal';
+import { Login } from './components/Login';
+import { PWAInstallButton } from './components/PWAInstallButton';
 import { useDriveApp } from './hooks/useDriveApp';
 import { downloadDiagnostics } from './lib/diagnostics';
 
@@ -59,12 +61,22 @@ export default function App() {
           <Cloud className="w-5 h-5 text-blue-600" />
           <span className="font-bold text-sm">Drive Semantic Search</span>
         </div>
-        <div className="flex items-center gap-2">
-          <span className="text-[10px] font-semibold px-2 py-1 rounded-full border border-zinc-200 dark:border-zinc-700">{syncStats.status}</span>
-          <button type="button" onClick={downloadDiagnostics} className="text-xs px-2 py-1 rounded-lg border border-zinc-200 dark:border-zinc-700" title="Export local diagnostics JSON (tokens redacted)">Diagnostics</button>
-          {isGoogleConnected ? (
-            <button type="button" onClick={handleGoogleSignOut} className="text-xs px-2 py-1 rounded-lg border border-zinc-200 dark:border-zinc-700">Sign out</button>
-          ) : null}
+        <div className="flex items-center justify-end flex-wrap gap-2">
+          <span className="hidden sm:inline text-[10px] font-semibold px-2 py-1 rounded-full border border-zinc-200 dark:border-zinc-700" title={`Last synced ${new Date(syncStats.lastSynced).toLocaleTimeString()}`}>
+            {isGoogleLoading ? 'syncing' : syncStats.status}
+          </span>
+          <PWAInstallButton />
+          <button type="button" onClick={downloadDiagnostics} className="text-xs px-2 py-1 rounded-lg border border-zinc-200 dark:border-zinc-700 min-h-[36px]" title="Export local diagnostics JSON (tokens redacted)">Diagnostics</button>
+          <Login
+            userEmail={userProfile.email}
+            userName={userProfile.name}
+            avatarUrl={userProfile.avatar}
+            isConnected={isGoogleConnected}
+            isLoading={isGoogleLoading}
+            onSignIn={handleGoogleSignIn}
+            onSignOut={handleGoogleSignOut}
+            onSyncDrive={() => handleSyncGoogleDrive()}
+          />
         </div>
       </header>
 
@@ -140,8 +152,10 @@ export default function App() {
         {activeTab === 'storage_scanner' && (
           <React.Suspense fallback={<TabLoadingFallback />}>
             <DeviceStorageScanner
-              onImportToDrive={(file) => { handleUploadFile(file); showDriveToast('Imported to local list: ' + file.name); }}
-              onImportToVault={() => showDriveToast('Use Vault tab to encrypt notes')}
+              onImportToDrive={(file) => { handleUploadFile(file); showDriveToast('Added to Dashboard list: ' + file.name); }}
+              onImportToVault={(vf) => { handleAddVaultFile(vf); showDriveToast('Encrypted into Vault: ' + vf.originalName); }}
+              onUploadToDrive={handleUploadToDrive}
+              isGoogleConnected={isGoogleConnected && !!googleAccessToken}
             />
           </React.Suspense>
         )}

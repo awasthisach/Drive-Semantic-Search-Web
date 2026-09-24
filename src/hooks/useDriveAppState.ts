@@ -157,6 +157,8 @@ export function useDriveAppState() {
       () => {
         setIsGoogleConnected(false);
         setGoogleAccessToken(null);
+        setSharedDrives([]);
+        setUserProfile(p => (p.isConnected ? { ...p, isConnected: false } : p));
       }
     );
     return () => unsubscribe();

@@ -52,3 +52,26 @@ export function findDuplicates(files: DriveFile[]): DuplicateGroup[] {
     return b.reclaimableSize - a.reclaimableSize;
   });
 }
+
+/**
+ * Trash-safety: a duplicate group must always keep at least one copy.
+ * Returns the ids that are safe to remove given the user's selection:
+ * only SHA-256 confirmed groups, and never every file of a group (the
+ * oldest/primary is kept when the whole group was selected).
+ */
+export function safeTrashSelection(groups: DuplicateGroup[], selected: Set<string>): string[] {
+  const out = new Set<string>();
+  for (const group of groups) {
+    if (!group.hash.startsWith('sha256:')) continue;
+    const picked = group.files.filter(f => selected.has(f.id));
+    if (picked.length === 0) continue;
+    const keep = picked.length === group.files.length ? group.files[0].id : null;
+    for (const f of picked) if (f.id !== keep) out.add(f.id);
+  }
+  return Array.from(out);
+}
+
+/** True when selecting `id` would leave no unselected copy in its group. */
+export function wouldEmptyGroup(group: DuplicateGroup, selected: Set<string>, id: string): boolean {
+  return group.files.filter(f => f.id !== id).every(f => selected.has(f.id));
+}

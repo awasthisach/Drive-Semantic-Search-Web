@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { findDuplicates } from '../duplicateEngine';
+import { findDuplicates, safeTrashSelection, wouldEmptyGroup } from '../duplicateEngine';
 import type { DriveFile } from '../../types';
 
 function makeFile(partial: Partial<DriveFile> & { id: string; name: string }): DriveFile {
@@ -55,5 +55,39 @@ describe('findDuplicates', () => {
       makeFile({ id: '2', name: 'same.pdf', size: 0 }),
     ];
     expect(findDuplicates(files)).toEqual([]);
+  });
+});
+
+describe('trash safety', () => {
+  const group = {
+    hash: 'sha256:abc',
+    fileCount: 3,
+    totalSize: 300,
+    reclaimableSize: 200,
+    files: [
+      makeFile({ id: 'p', name: 'a.pdf', size: 100, contentHash: 'sha256:abc' }),
+      makeFile({ id: 'd1', name: 'a.pdf', size: 100, contentHash: 'sha256:abc' }),
+      makeFile({ id: 'd2', name: 'a.pdf', size: 100, contentHash: 'sha256:abc' }),
+    ],
+  };
+  const candidate = { ...group, hash: 'size:100|name:a.pdf' };
+
+  it('never returns every file of a group', () => {
+    const ids = safeTrashSelection([group], new Set(['p', 'd1', 'd2']));
+    expect(ids.sort()).toEqual(['d1', 'd2']);
+  });
+
+  it('lets the user keep a non-primary copy', () => {
+    const ids = safeTrashSelection([group], new Set(['p', 'd1']));
+    expect(ids.sort()).toEqual(['d1', 'p']);
+  });
+
+  it('ignores unconfirmed candidate groups', () => {
+    expect(safeTrashSelection([candidate], new Set(['d1', 'd2']))).toEqual([]);
+  });
+
+  it('detects a selection that would empty the group', () => {
+    expect(wouldEmptyGroup(group, new Set(['d1', 'd2']), 'p')).toBe(true);
+    expect(wouldEmptyGroup(group, new Set(['d1']), 'p')).toBe(false);
   });
 });

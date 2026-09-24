@@ -1,5 +1,5 @@
 import React from 'react';
-import { AlertCircle, Cloud, Sparkles, ExternalLink, X, RefreshCw, ShieldAlert } from 'lucide-react';
+import { AlertCircle, Sparkles, X, RefreshCw, ShieldAlert } from 'lucide-react';
 
 interface AuthErrorModalProps {
   isOpen: boolean;
@@ -20,6 +20,8 @@ export const AuthErrorModal: React.FC<AuthErrorModalProps> = ({
 }) => {
   if (!isOpen) return null;
 
+  const currentOrigin = typeof window !== 'undefined' ? window.location.origin : '';
+  const currentHost = typeof window !== 'undefined' ? window.location.hostname : '';
   const isUnauthorizedDomain =
     errorMessage.toLowerCase().includes('unauthorized-domain') ||
     errorMessage.toLowerCase().includes('origin') ||
@@ -80,7 +82,7 @@ export const AuthErrorModal: React.FC<AuthErrorModalProps> = ({
                 🌐 डोमेन ऑथराइजेशन की आवश्यकता (Domain Authorization):
               </p>
               <p className="text-zinc-300">
-                Google सुरक्षा कारणों से इस नए डेवलपमेंट लिंक को नहीं पहचान पा रहा है। इसे ठीक करने के लिए आपको Google Cloud Console में OAuth 2.0 Client IDs सेटिंग में <span className="text-white font-semibold">Authorized JavaScript origins</span> में यह लिंक (<code className="text-blue-300 bg-blue-950 px-1 py-0.5 rounded font-mono">https://ais-dev-y3xuzxdnayshpet3dy7dlt-608230001000.asia-southeast1.run.app</code>) जोड़ना होगा।
+                Google इस origin को नहीं पहचान पा रहा है। इसे ठीक करने के लिए <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noreferrer" className="text-blue-300 underline">Google Cloud Console → Credentials</a> में OAuth 2.0 Client ID की <span className="text-white font-semibold">Authorized JavaScript origins</span> में यह origin (<code className="text-blue-300 bg-blue-950 px-1 py-0.5 rounded font-mono">{currentOrigin}</code>) जोड़ें, और <a href="https://console.firebase.google.com/project/thevvforg/authentication/settings" target="_blank" rel="noreferrer" className="text-blue-300 underline">Firebase Authentication → Authorized domains</a> में <code className="text-blue-300 bg-blue-950 px-1 py-0.5 rounded font-mono">{currentHost}</code> जोड़ें।
               </p>
             </>
           ) : (

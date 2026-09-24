@@ -1,11 +1,12 @@
 import React, { useState, useMemo } from 'react';
 import {
   UploadCloud, Star, CheckCircle2, Cloud,
-  X, CheckSquare, Square, Search, RefreshCw, FolderInput,
+  X, CheckSquare, Square, Search, RefreshCw, FolderInput, Pin, Lock, Copy,
 } from 'lucide-react';
 import { DriveFile, FileCategory, VaultFile, FolderItem, AppTab } from '../types';
 import { formatBytes } from '../lib/driveApi';
 import { runSemanticSearch } from '../lib/searchEngine';
+import { findDuplicates } from '../lib/duplicateEngine';
 import { DriveFileTypeFilter, DriveCorpus, SharedDriveInfo } from '../lib/googleDriveService';
 import { FileTypeSelector } from './FileTypeSelector';
 import { MoveToFolderModal } from './MoveToFolderModal';
@@ -67,6 +68,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const filteredFiles = useMemo(() => {
     let list = files;
     if (filterCategory === 'starred') list = list.filter(f => f.starred);
+    else if (filterCategory === 'offline') list = list.filter(f => f.isOffline);
     else if (filterCategory === 'google_drive') list = list.filter(f => f.isGoogleDriveItem);
     else if (filterCategory !== 'all') list = list.filter(f => f.category === filterCategory);
 
@@ -78,6 +80,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
   React.useEffect(() => {
     setVisibleCount(PAGE_SIZE);
   }, [filterCategory, searchTerm, files.length]);
+
+  const duplicateCandidateCount = useMemo(
+    () => findDuplicates(files).reduce((acc, g) => acc + g.files.length - 1, 0),
+    [files]
+  );
 
   const visibleFiles = useMemo(
     () => filteredFiles.slice(0, visibleCount),
@@ -234,7 +241,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
           <option value="document">Documents</option>
           <option value="image">Images</option>
           <option value="spreadsheet">Spreadsheets</option>
+          <option value="video">Videos</option>
+          <option value="audio">Audio</option>
+          <option value="code">Code</option>
+          <option value="archive">Archives</option>
+          <option value="other">Other</option>
           <option value="starred">Starred</option>
+          <option value="offline">Offline pinned</option>
           <option value="google_drive">Google Drive</option>
         </select>
         <label className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-blue-600 text-white text-xs font-bold cursor-pointer">
@@ -242,6 +255,25 @@ export const Dashboard: React.FC<DashboardProps> = ({
           {isGoogleConnected ? 'Upload to Drive' : 'Upload'}
           <input type="file" className="hidden" onChange={handleFileUpload} />
         </label>
+      </div>
+
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+        <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-2">
+          <div className="text-[10px] uppercase tracking-wide text-zinc-500">Files</div>
+          <div className="text-base font-bold">{files.length}</div>
+        </div>
+        <button type="button" onClick={() => onSelectTab('offline')} className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-2 text-left hover:border-emerald-400">
+          <div className="text-[10px] uppercase tracking-wide text-zinc-500 inline-flex items-center gap-1"><Pin className="w-3 h-3" /> Offline</div>
+          <div className="text-base font-bold">{files.filter(f => f.isOffline).length}</div>
+        </button>
+        <button type="button" onClick={() => onSelectTab('vault')} className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-2 text-left hover:border-indigo-400">
+          <div className="text-[10px] uppercase tracking-wide text-zinc-500 inline-flex items-center gap-1"><Lock className="w-3 h-3" /> Vault</div>
+          <div className="text-base font-bold">{vaultFiles.length}</div>
+        </button>
+        <button type="button" onClick={() => onSelectTab('duplicates')} className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-2 text-left hover:border-amber-400">
+          <div className="text-[10px] uppercase tracking-wide text-zinc-500 inline-flex items-center gap-1"><Copy className="w-3 h-3" /> Duplicates</div>
+          <div className="text-base font-bold">{duplicateCandidateCount}</div>
+        </button>
       </div>
 
       <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -295,9 +327,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 {file.isGoogleDriveItem && <span className="text-[10px] text-blue-600 font-semibold">Drive</span>}
               </div>
               <div className="flex flex-col items-end gap-1 shrink-0">
-                <button type="button" onClick={e => { e.stopPropagation(); onToggleStar(file.id); }} title="Star">
-                  <Star className={`w-4 h-4 ${file.starred ? 'text-amber-500 fill-amber-500' : 'text-zinc-400'}`} />
-                </button>
+                <div className="flex items-center gap-1.5">
+                  <button type="button" onClick={e => { e.stopPropagation(); onToggleStar(file.id); }} title="Star">
+                    <Star className={`w-4 h-4 ${file.starred ? 'text-amber-500 fill-amber-500' : 'text-zinc-400'}`} />
+                  </button>
+                  <button type="button" onClick={e => { e.stopPropagation(); onToggleOffline(file.id); }} title={file.isOffline ? 'Unpin offline' : 'Pin offline'}>
+                    <Pin className={`w-4 h-4 ${file.isOffline ? 'text-emerald-500' : 'text-zinc-400'}`} />
+                  </button>
+                </div>
                 <button
                   type="button"
                   title="Move to folder"

@@ -1,37 +1,48 @@
 import React, { useState, useMemo, useRef } from 'react';
+import { CheckCircle2, CheckSquare, Square, X, Lock, UploadCloud, Loader2 } from 'lucide-react';
 import {
-  Smartphone, HardDrive, FolderSearch, Trash2, Cloud, Lock, Copy, AlertTriangle,
-  CheckCircle2, Search, Filter, CheckSquare, Square, ArrowRightLeft, UploadCloud,
-  FileVideo, FileText, FileArchive, Image as ImageIcon, Sparkles, RefreshCw,
-  FolderOpen, Folder, X, Layers, Zap,
-} from 'lucide-react';
-import {
-  DeviceStorageFile, StorageSource, StorageDeviceStats, DriveFile, VaultFile, FileCategory,
+  DeviceStorageFile, StorageSource, DriveFile, VaultFile, FileCategory,
 } from '../types';
-import { INITIAL_PHONE_STATS, INITIAL_SD_STATS, MOCK_DEVICE_FILES } from '../lib/deviceStorageMock';
+import { MOCK_DEVICE_FILES } from '../lib/deviceStorageMock';
 import { formatBytes } from '../lib/driveApi';
+import { encryptDataWithWorker } from '../lib/cryptoVault';
 
 interface DeviceStorageScannerProps {
   onImportToDrive: (file: DriveFile) => void;
   onImportToVault: (vaultFile: VaultFile) => void;
+  onUploadToDrive?: (file: File) => Promise<void>;
+  isGoogleConnected?: boolean;
   onSelectPreviewFile?: (file: DriveFile) => void;
 }
 
+type TypeFilter = 'all' | 'large' | 'duplicates' | 'junk' | 'video' | 'image' | 'document';
+const TYPE_FILTERS: TypeFilter[] = ['all', 'large', 'duplicates', 'junk', 'video', 'image', 'document'];
+
+// Non-standard attrs (Chromium/WebKit folder picker) not in React's input typings.
+const DIRECTORY_PICKER_ATTRS = { webkitdirectory: '', directory: '' } as React.InputHTMLAttributes<HTMLInputElement>;
+
+const VAULT_MAX_BYTES = 2 * 1024 * 1024;
+const isTextLike = (f: File) =>
+  f.type.startsWith('text/') ||
+  /json|xml|csv|javascript|markdown/.test(f.type) ||
+  /\.(txt|md|csv|json|xml|log|ini|yml|yaml|js|ts|py|html|css)$/i.test(f.name);
+
 export const DeviceStorageScanner: React.FC<DeviceStorageScannerProps> = ({
-  onImportToDrive, onImportToVault, onSelectPreviewFile,
+  onImportToDrive, onImportToVault, onUploadToDrive, isGoogleConnected = false,
 }) => {
   const [deviceFiles, setDeviceFiles] = useState<DeviceStorageFile[]>(MOCK_DEVICE_FILES);
-  const [phoneStats, setPhoneStats] = useState<StorageDeviceStats>(INITIAL_PHONE_STATS);
-  const [sdStats, setSdStats] = useState<StorageDeviceStats>(INITIAL_SD_STATS);
   const [isScanning, setIsScanning] = useState(false);
   const [scanProgress, setScanProgress] = useState(0);
   const [scanCurrentItem, setScanCurrentItem] = useState('');
   const [lastScannedSource, setLastScannedSource] = useState('Phone Memory & SD Card');
   const [activeSourceFilter, setActiveSourceFilter] = useState<'all' | StorageSource>('all');
-  const [activeTypeFilter, setActiveTypeFilter] = useState<'all' | 'large' | 'duplicates' | 'junk' | 'video' | 'image' | 'document'>('all');
+  const [activeTypeFilter, setActiveTypeFilter] = useState<TypeFilter>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedFileIds, setSelectedFileIds] = useState<Set<string>>(new Set());
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [vaultPassphrase, setVaultPassphrase] = useState('');
+  const [showVaultPassphrase, setShowVaultPassphrase] = useState(false);
+  const [busyAction, setBusyAction] = useState<'upload' | 'vault' | null>(null);
   const phoneFolderInputRef = useRef<HTMLInputElement>(null);
   const sdFolderInputRef = useRef<HTMLInputElement>(null);
 
@@ -97,7 +108,15 @@ export const DeviceStorageScanner: React.FC<DeviceStorageScannerProps> = ({
         rawFileRef: f,
       });
     }
-    setDeviceFiles(prev => [...newFiles, ...prev]);
+    setDeviceFiles(prev => {
+      const merged = [...newFiles, ...prev];
+      const seen = new Map<string, number>();
+      for (const f of merged) {
+        const key = `${f.name.toLowerCase()}|${f.size}`;
+        seen.set(key, (seen.get(key) || 0) + 1);
+      }
+      return merged.map(f => ({ ...f, isDuplicate: (seen.get(`${f.name.toLowerCase()}|${f.size}`) || 0) > 1 }));
+    });
     showToast(`Indexed ${newFiles.length} files from picker (local metadata only)`);
     e.target.value = '';
   };
@@ -134,8 +153,82 @@ export const DeviceStorageScanner: React.FC<DeviceStorageScannerProps> = ({
     showToast(`Indexed ${filesToBackup.length} items locally (not uploaded to Google Drive — bytes stay on device).`);
   };
 
-  const handleEncryptToVault = (_filesToVault: DeviceStorageFile[]) => {
-    showToast('Encryption unavailable: device scan items have no file bytes. Use Privacy Vault to encrypt text you enter yourself.');
+  const handleUploadToDrive = async (filesToUpload: DeviceStorageFile[]) => {
+    if (!onUploadToDrive) return;
+    const withBytes = filesToUpload.filter(f => f.rawFileRef);
+    if (withBytes.length === 0) {
+      showToast('Nothing to upload: only files picked via the folder picker have bytes (demo items are metadata only).');
+      return;
+    }
+    setBusyAction('upload');
+    let ok = 0;
+    try {
+      for (const f of withBytes) {
+        const raw = f.rawFileRef;
+        if (!raw) continue;
+        try {
+          await onUploadToDrive(raw);
+          ok++;
+        } catch (err) {
+          console.warn('Drive upload failed for', f.name, err);
+        }
+      }
+    } finally {
+      setBusyAction(null);
+    }
+    showToast(`Drive upload finished for ${ok}/${withBytes.length} file(s)${filesToUpload.length > withBytes.length ? ` (${filesToUpload.length - withBytes.length} skipped: demo items have no bytes)` : ''}. Check Dashboard for results.`);
+  };
+
+  const vaultEligible = (f: DeviceStorageFile) =>
+    !!f.rawFileRef && f.rawFileRef.size <= VAULT_MAX_BYTES && isTextLike(f.rawFileRef);
+
+  const handleEncryptToVault = async (filesToVault: DeviceStorageFile[]) => {
+    const eligible = filesToVault.filter(vaultEligible);
+    if (eligible.length === 0) {
+      showToast('Vault accepts picked text-like files up to 2 MB (txt, md, csv, json, code). Demo items have no bytes.');
+      return;
+    }
+    if (!showVaultPassphrase) {
+      setShowVaultPassphrase(true);
+      return;
+    }
+    if (vaultPassphrase.length < 8) {
+      showToast('Passphrase must be at least 8 characters');
+      return;
+    }
+    setBusyAction('vault');
+    let ok = 0;
+    try {
+      for (const f of eligible) {
+        const raw = f.rawFileRef;
+        if (!raw) continue;
+        try {
+          const text = await raw.text();
+          const { ciphertext, iv, salt } = await encryptDataWithWorker(text, vaultPassphrase);
+          onImportToVault({
+            id: `vault-${Date.now()}-${ok}`,
+            name: f.name + '.aes',
+            originalName: f.name,
+            size: text.length,
+            mimeType: f.mimeType || 'text/plain',
+            encryptedData: ciphertext,
+            iv,
+            salt,
+            uploadedAt: new Date().toISOString(),
+            tags: ['device-scan', f.source, f.category],
+            notes: `Encrypted in browser with AES-GCM from ${f.path}`,
+          });
+          ok++;
+        } catch (err) {
+          console.warn('Vault encrypt failed for', f.name, err);
+        }
+      }
+    } finally {
+      setBusyAction(null);
+      setVaultPassphrase('');
+      setShowVaultPassphrase(false);
+    }
+    showToast(`Encrypted ${ok}/${eligible.length} file(s) into Privacy Vault${filesToVault.length > eligible.length ? ` (${filesToVault.length - eligible.length} skipped: not text-like or no bytes)` : ''}`);
   };
 
   const handleTriggerScan = () => {
@@ -165,14 +258,17 @@ export const DeviceStorageScanner: React.FC<DeviceStorageScannerProps> = ({
         </div>
       )}
 
-      <input type="file" ref={phoneFolderInputRef} {...({ webkitdirectory: '', directory: '' } as any)} multiple className="hidden"
+      <input type="file" ref={phoneFolderInputRef} {...DIRECTORY_PICKER_ATTRS} multiple className="hidden"
         onChange={e => handleDirectoryPicked(e, 'phone_internal')} />
-      <input type="file" ref={sdFolderInputRef} {...({ webkitdirectory: '', directory: '' } as any)} multiple className="hidden"
+      <input type="file" ref={sdFolderInputRef} {...DIRECTORY_PICKER_ATTRS} multiple className="hidden"
         onChange={e => handleDirectoryPicked(e, 'sd_card')} />
 
       <div className="rounded-2xl bg-zinc-900 text-white p-5 space-y-3">
-        <h2 className="text-lg font-bold">Device Storage Scanner (demo)</h2>
-        <p className="text-xs text-zinc-400">Mock + folder picker metadata. Does not wipe phone storage or upload bytes to Drive.</p>
+        <h2 className="text-lg font-bold">Device Storage Scanner</h2>
+        <p className="text-xs text-zinc-400">
+          Deep Scan shows demo data. Pick a folder to list real files (browser metadata only — never deletes from your device).
+          Picked files can be uploaded to Drive{isGoogleConnected ? '' : ' after Google sign-in'} or text files encrypted into the Vault.
+        </p>
         <div className="flex flex-wrap gap-2">
           <button type="button" disabled={isScanning} onClick={handleTriggerScan}
             className="px-3 py-2 rounded-xl bg-blue-600 text-xs font-bold disabled:opacity-50">
@@ -189,20 +285,57 @@ export const DeviceStorageScanner: React.FC<DeviceStorageScannerProps> = ({
       <div className="flex flex-wrap gap-2 items-center">
         <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Filter files..."
           className="flex-1 min-w-[140px] px-3 py-2 rounded-xl border text-sm" />
-        <select value={activeSourceFilter} onChange={e => setActiveSourceFilter(e.target.value as any)}
+        <select value={activeSourceFilter} onChange={e => setActiveSourceFilter(e.target.value as 'all' | StorageSource)}
           className="px-3 py-2 rounded-xl border text-xs">
           <option value="all">All sources</option>
           <option value="phone_internal">Phone</option>
           <option value="sd_card">SD</option>
         </select>
+        <select value={activeTypeFilter} onChange={e => setActiveTypeFilter(e.target.value as TypeFilter)}
+          className="px-3 py-2 rounded-xl border text-xs">
+          {TYPE_FILTERS.map(t => (
+            <option key={t} value={t}>{t === 'all' ? 'All types' : t.charAt(0).toUpperCase() + t.slice(1)}</option>
+          ))}
+        </select>
+        <button type="button" className="px-2.5 py-2 rounded-xl border text-xs font-semibold"
+          onClick={() => setSelectedFileIds(prev => prev.size === filteredFiles.length ? new Set() : new Set(filteredFiles.map(f => f.id)))}>
+          {filteredFiles.length > 0 && selectedFileIds.size === filteredFiles.length ? 'Deselect all' : 'Select all'}
+        </button>
       </div>
 
       {selectedFiles.length > 0 && (
-        <div className="flex flex-wrap gap-2 text-xs">
-          <span className="font-semibold">{selectedFiles.length} selected</span>
-          <button type="button" className="px-2 py-1 rounded-lg border" onClick={() => handleBackupToDrive(selectedFiles)}>Index locally</button>
-          <button type="button" className="px-2 py-1 rounded-lg border" onClick={() => handleEncryptToVault(selectedFiles)}>Encrypt to Vault</button>
-          <button type="button" className="px-2 py-1 rounded-lg border text-red-600" onClick={() => handleDeleteFiles(Array.from(selectedFileIds))}>Remove from list</button>
+        <div className="space-y-2">
+          <div className="flex flex-wrap gap-2 text-xs items-center">
+            <span className="font-semibold">{selectedFiles.length} selected</span>
+            <button type="button" className="px-2 py-1 rounded-lg border" title="Add metadata to the Dashboard file list (no upload)" onClick={() => handleBackupToDrive(selectedFiles)}>Add to Dashboard list</button>
+            {isGoogleConnected && onUploadToDrive && (
+              <button type="button" disabled={busyAction !== null} className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-blue-600 text-white font-bold disabled:opacity-50" onClick={() => handleUploadToDrive(selectedFiles)}>
+                {busyAction === 'upload' ? <Loader2 className="w-3 h-3 animate-spin" /> : <UploadCloud className="w-3 h-3" />} Upload to Drive
+              </button>
+            )}
+            <button type="button" disabled={busyAction !== null} className="inline-flex items-center gap-1 px-2 py-1 rounded-lg border disabled:opacity-50" onClick={() => handleEncryptToVault(selectedFiles)}>
+              {busyAction === 'vault' ? <Loader2 className="w-3 h-3 animate-spin" /> : <Lock className="w-3 h-3" />} Encrypt to Vault
+            </button>
+            <button type="button" className="px-2 py-1 rounded-lg border text-red-600" onClick={() => handleDeleteFiles(Array.from(selectedFileIds))}>Remove from list</button>
+          </div>
+          {showVaultPassphrase && (
+            <form
+              className="flex flex-wrap gap-2 items-center text-xs"
+              onSubmit={e => { e.preventDefault(); handleEncryptToVault(selectedFiles); }}
+            >
+              <input
+                type="password"
+                autoFocus
+                value={vaultPassphrase}
+                onChange={e => setVaultPassphrase(e.target.value)}
+                placeholder="Vault passphrase (min 8 chars)"
+                className="px-3 py-1.5 rounded-lg border bg-white dark:bg-zinc-900 min-w-[220px]"
+              />
+              <button type="submit" disabled={vaultPassphrase.length < 8 || busyAction !== null} className="px-2 py-1.5 rounded-lg bg-indigo-600 text-white font-bold disabled:opacity-50">Encrypt now</button>
+              <button type="button" className="px-2 py-1.5 rounded-lg border" onClick={() => { setShowVaultPassphrase(false); setVaultPassphrase(''); }}>Cancel</button>
+              <span className="text-zinc-500">Use the same passphrase to unlock in the Vault tab.</span>
+            </form>
+          )}
         </div>
       )}
 
@@ -214,7 +347,13 @@ export const DeviceStorageScanner: React.FC<DeviceStorageScannerProps> = ({
             </button>
             <div className="min-w-0 flex-1">
               <div className="text-sm font-semibold truncate">{f.name}</div>
-              <div className="text-[10px] text-zinc-500">{formatBytes(f.size)} • {f.source} • {f.category}</div>
+              <div className="text-[10px] text-zinc-500">
+                {formatBytes(f.size)} • {f.source} • {f.category}
+                {f.rawFileRef ? ' • picked' : ' • demo'}
+                {f.isDuplicate ? ' • duplicate' : ''}
+                {f.isLargeFile ? ' • large' : ''}
+                {f.isCacheOrJunk ? ' • junk' : ''}
+              </div>
             </div>
           </div>
         ))}

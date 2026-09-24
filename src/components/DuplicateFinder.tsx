@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Copy, Trash2, CheckCircle, Check, FileText } from 'lucide-react';
 import { DriveFile } from '../types';
-import { findDuplicates } from '../lib/duplicateEngine';
+import { findDuplicates, safeTrashSelection, wouldEmptyGroup } from '../lib/duplicateEngine';
 import { formatBytes } from '../lib/driveApi';
 
 interface DuplicateFinderProps {
@@ -13,6 +13,7 @@ interface DuplicateFinderProps {
 
 export const DuplicateFinder: React.FC<DuplicateFinderProps> = ({ files, onRemoveFiles, onVerifyHashes, verifyBusy }) => {
   const [selectedDuplicates, setSelectedDuplicates] = useState<Set<string>>(() => new Set());
+  const [keepOneHint, setKeepOneHint] = useState<string | null>(null);
   const duplicateGroups = findDuplicates(files);
   const totalReclaimable = duplicateGroups.reduce((acc, group) => acc + group.reclaimableSize, 0);
 
@@ -25,8 +26,17 @@ export const DuplicateFinder: React.FC<DuplicateFinderProps> = ({ files, onRemov
   const toggleSelect = (id: string) => {
     if (!confirmedIds.has(id)) return;
     const next = new Set(selectedDuplicates);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
+    if (next.has(id)) {
+      next.delete(id);
+    } else {
+      const group = duplicateGroups.find(g => g.files.some(f => f.id === id));
+      if (group && wouldEmptyGroup(group, next, id)) {
+        setKeepOneHint(group.hash);
+        return;
+      }
+      next.add(id);
+    }
+    setKeepOneHint(null);
     setSelectedDuplicates(next);
   };
 
@@ -42,7 +52,7 @@ export const DuplicateFinder: React.FC<DuplicateFinderProps> = ({ files, onRemov
   const handleDeselectAll = () => setSelectedDuplicates(new Set());
 
   const handleCleanSelected = () => {
-    const safe = Array.from(selectedDuplicates).filter(id => confirmedIds.has(id));
+    const safe = safeTrashSelection(duplicateGroups, selectedDuplicates);
     if (safe.length === 0) return;
     onRemoveFiles(safe);
     setSelectedDuplicates(new Set());
@@ -145,6 +155,11 @@ export const DuplicateFinder: React.FC<DuplicateFinderProps> = ({ files, onRemov
                     <span className="text-zinc-500">{group.fileCount} files · reclaim ~{formatBytes(group.reclaimableSize)}</span>
                   </div>
                 </div>
+                {keepOneHint === group.hash && (
+                  <p className="px-4 py-1.5 text-[11px] font-semibold text-amber-700 bg-amber-50 dark:bg-amber-950/30 dark:text-amber-300">
+                    At least one copy must stay — deselect another file first.
+                  </p>
+                )}
                 <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">
                   {group.files.map((file, idx) => (
                     <li key={file.id} className="flex items-center gap-3 px-4 py-3">

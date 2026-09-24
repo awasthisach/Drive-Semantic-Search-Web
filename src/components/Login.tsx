@@ -1,5 +1,5 @@
 import React from 'react';
-import { User, ShieldCheck, LogOut, CheckCircle2, Cloud, RefreshCw, Loader2 } from 'lucide-react';
+import { User, LogOut, CheckCircle2, RefreshCw, Loader2 } from 'lucide-react';
 
 interface LoginProps {
   userEmail: string;
@@ -53,13 +53,19 @@ export const Login: React.FC<LoginProps> = ({
   return (
     <div className="flex items-center gap-1.5 sm:gap-2">
       <div className="flex items-center gap-2 px-2.5 py-1 rounded-full bg-zinc-100 dark:bg-zinc-800/80 border border-zinc-200/80 dark:border-zinc-700/60 min-h-[36px]">
-        <img
-          src={avatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80'}
-          alt={userName}
-          className="w-6 h-6 rounded-full ring-1 ring-zinc-300 dark:ring-zinc-600 object-cover"
-          referrerPolicy="no-referrer"
-        />
-        <div className="hidden sm:block text-left">
+        {avatarUrl ? (
+          <img
+            src={avatarUrl}
+            alt={userName}
+            className="w-6 h-6 rounded-full ring-1 ring-zinc-300 dark:ring-zinc-600 object-cover"
+            referrerPolicy="no-referrer"
+          />
+        ) : (
+          <span className="w-6 h-6 rounded-full ring-1 ring-zinc-300 dark:ring-zinc-600 bg-blue-600/10 text-blue-600 flex items-center justify-center">
+            <User className="w-3.5 h-3.5" />
+          </span>
+        )}
+        <div className="hidden sm:block text-left" title={userEmail || userName}>
           <p className="text-xs font-semibold text-zinc-900 dark:text-zinc-100 leading-none truncate max-w-[120px]">
             {userName}
           </p>

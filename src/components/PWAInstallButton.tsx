@@ -27,7 +27,7 @@ export const PWAInstallButton: React.FC = () => {
         type="button"
         onClick={handleInstallClick}
         className="flex items-center gap-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 text-xs font-semibold shadow-xs transition min-h-[36px]"
-        title="Install Perfect VVF App"
+        title="Install Drive Semantic Search as an app"
       >
         {installSuccess ? (
           <>
