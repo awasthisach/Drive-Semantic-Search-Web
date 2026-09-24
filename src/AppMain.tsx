@@ -35,7 +35,7 @@ const TabLoadingFallback = () => (
 
 export default function App() {
   const {
-    files, folders, vaultFiles,
+    files, folders, vaultFiles, vaultLoaded,
     isGoogleConnected, isGoogleLoading, googleAccessToken,
     driveFileTypeFilter, setDriveFileTypeFilter, driveCorpus, setDriveCorpus,
     sharedDriveId, setSharedDriveId, sharedDrives,
@@ -134,7 +134,7 @@ export default function App() {
         )}
         {activeTab === 'vault' && (
           <React.Suspense fallback={<TabLoadingFallback />}>
-            <PrivacyVault vaultFiles={vaultFiles} onAddVaultFile={handleAddVaultFile} onDeleteVaultFile={handleDeleteVaultFile} />
+            <PrivacyVault vaultFiles={vaultFiles} vaultLoaded={vaultLoaded} onAddVaultFile={handleAddVaultFile} onDeleteVaultFile={handleDeleteVaultFile} />
           </React.Suspense>
         )}
         {activeTab === 'storage_scanner' && (
