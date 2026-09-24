@@ -7,12 +7,14 @@ interface PrivacyVaultProps {
   vaultFiles: VaultFile[];
   onAddVaultFile: (file: VaultFile) => void;
   onDeleteVaultFile: (id: string) => void;
+  vaultLoaded?: boolean;
 }
 
 export const PrivacyVault: React.FC<PrivacyVaultProps> = ({
   vaultFiles,
   onAddVaultFile,
   onDeleteVaultFile,
+  vaultLoaded = true,
 }) => {
   const [isUnlocked, setIsUnlocked] = useState(false);
   const [passphrase, setPassphrase] = useState('');
@@ -29,6 +31,7 @@ export const PrivacyVault: React.FC<PrivacyVaultProps> = ({
 
   const handleUnlock = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!vaultLoaded) return;
     if (!inputPass || inputPass.length < 8) {
       setErrorMsg('Passphrase must be at least 8 characters');
       return;
@@ -113,7 +116,7 @@ export const PrivacyVault: React.FC<PrivacyVaultProps> = ({
           <h2 className="font-bold text-sm">Privacy Vault</h2>
         </div>
         <p className="text-xs text-zinc-500">
-          Choose your own passphrase (min 8 chars). Ciphertext is stored in IndexedDB on this device; the passphrase is never saved.
+          {vaultLoaded ? 'Choose your own passphrase' : 'Loading vault data… please wait'} (min 8 chars). Ciphertext is stored in IndexedDB on this device; the passphrase is never saved.
         </p>
         <form onSubmit={handleUnlock} className="space-y-3">
           <div className="relative">
@@ -130,7 +133,7 @@ export const PrivacyVault: React.FC<PrivacyVaultProps> = ({
             </button>
           </div>
           {errorMsg && <p className="text-xs text-red-500">{errorMsg}</p>}
-          <button type="submit" className="w-full py-2.5 rounded-xl bg-amber-600 text-white text-xs font-bold flex items-center justify-center gap-2">
+          <button type="submit" disabled={!vaultLoaded} className="w-full py-2.5 rounded-xl bg-amber-600 text-white text-xs font-bold flex items-center justify-center gap-2">
             <Unlock className="w-4 h-4" /> Unlock Vault
           </button>
         </form>
