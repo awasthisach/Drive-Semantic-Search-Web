@@ -136,7 +136,8 @@ async function callGeminiEmbed(
   model: string,
   dimension: number,
   texts: string[],
-  mode: 'query' | 'document'
+  mode: 'query' | 'document',
+  contractVersion: '2' | '3'
 ): Promise<{ ok: true; embeddings: number[][] } | { ok: false; status: number }> {
   const url =
     'https://generativelanguage.googleapis.com/v1beta/models/' +
@@ -147,7 +148,12 @@ async function callGeminiEmbed(
     model: 'models/' + model,
     content: {
       parts: [{
-        text: mode === 'query' ? 'task: search result | query: ' + text : text,
+        text:
+          mode === 'query'
+            ? 'task: search result | query: ' + text
+            : contractVersion === '2'
+              ? 'title: none | text: ' + text
+              : text,
       }],
     },
     outputDimensionality: dimension,
@@ -286,7 +292,7 @@ export default {
       return json({ error: 'unsupported contract version' }, 400, corsOrigin);
     }
 
-    const result = await callGeminiEmbed(env, model, dimension, texts, mode);
+    const result = await callGeminiEmbed(env, model, dimension, texts, mode, responseVersion);
     if (!result.ok) {
       return json({ error: 'upstream embed failed', status: result.status }, 502, corsOrigin);
     }

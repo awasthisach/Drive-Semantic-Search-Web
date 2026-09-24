@@ -120,7 +120,7 @@ jobs:
         env:
           EMBED_ENDPOINT: ${{ secrets.VITE_EMBED_ENDPOINT || 'https://drive-semantic-embed.awasthi-sach.workers.dev' }}
           FIREBASE_TEST_ID_TOKEN: ${{ secrets.FIREBASE_TEST_ID_TOKEN }}
-        run: node scripts/verify-live-contract.mjs
+        run: node ../../scripts/verify-live-contract.mjs
 
   deploy-pages:
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
