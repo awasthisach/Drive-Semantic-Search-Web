@@ -200,6 +200,10 @@ export default {
       return new Response(null, { status: 204, headers: corsHeaders(corsOrigin) });
     }
 
+    if (request.method === 'GET' && new URL(request.url).pathname === '/') {
+      return json({ ok: true, model: env.EMBED_MODEL || DEFAULT_MODEL, version: '3', dimension: Number(env.EMBED_DIMENSION || DEFAULT_DIMENSION) }, 200, corsOrigin);
+    }
+
     if (request.method !== 'POST') {
       return json({ error: 'POST only' }, 405, corsOrigin);
     }
