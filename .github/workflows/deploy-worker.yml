@@ -1,11 +1,6 @@
-name: Deploy Cloudflare Embed Worker
+name: Manual Cloudflare Embed Worker Deploy
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "workers/embed/**"
-      - ".github/workflows/deploy-worker.yml"
   workflow_dispatch:
 
 permissions:
@@ -47,3 +42,9 @@ jobs:
           test -n "$CLOUDFLARE_API_TOKEN"
           test -n "$CLOUDFLARE_ACCOUNT_ID"
           npm run deploy
+      - name: Verify authenticated live embed contract
+        working-directory: .
+        env:
+          EMBED_ENDPOINT: ${{ secrets.VITE_EMBED_ENDPOINT || 'https://drive-semantic-embed.awasthi-sach.workers.dev' }}
+          FIREBASE_TEST_ID_TOKEN: ${{ secrets.FIREBASE_TEST_ID_TOKEN }}
+        run: node scripts/verify-live-contract.mjs

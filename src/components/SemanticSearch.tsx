@@ -11,7 +11,7 @@ import {
   getIndexedDocument,
   isDocumentStale,
   MAX_INDEX_CHARS,
-  chunkText,
+  buildEmbeddingChunks,
 } from '../lib/contentIndex';
 import { highlightSegments } from '../lib/searchHighlight';
 import { embedAndStoreChunks, hasCompatibleVectorSet } from '../lib/vectorIndex';
@@ -49,6 +49,7 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
   const [indexedCount, setIndexedCount] = useState(0);
   const [indexing, setIndexing] = useState(false);
   const [indexProgress, setIndexProgress] = useState('');
+  const [searchStatus, setSearchStatus] = useState('');
   const [resumeFrom, setResumeFrom] = useState(0);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const cancelIndexRef = useRef(false);
@@ -131,7 +132,13 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
     const handle = window.setTimeout(async () => {
       setSearching(true);
       try {
-        const r = await runHybridSearch(query, files, selectedCategory, corpusKey);
+        const r = await runHybridSearch(
+          query,
+          files,
+          selectedCategory,
+          corpusKey,
+          setSearchStatus
+        );
         if (!cancelled) setResults(r);
       } finally {
         if (!cancelled) setSearching(false);
@@ -165,6 +172,7 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
     setIndexing(true);
     let ok = 0;
     let fail = 0;
+    let embeddingFail = 0;
     let skippedFresh = 0;
     let truncated = 0;
     const failedNames: string[] = [];
@@ -194,7 +202,7 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
         if (!isDocumentStale(existing, f.modifiedTime)) {
           if (isEmbedConfigured() && existing?.text) {
             const provider = createEmbeddingProvider(() => getFirebaseIdToken());
-            const chunks = chunkText(existing.text);
+            const chunks = buildEmbeddingChunks(existing.name || f.name, existing.text);
             const compatible = await hasCompatibleVectorSet({
               fileId: f.id,
               corpusKey,
@@ -214,6 +222,7 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
               });
               if (migration.failed) {
                 fail++;
+                embeddingFail++;
                 if (failedNames.length < 20) failedNames.push(f.name);
                 continue;
               }
@@ -240,16 +249,18 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
           if (isEmbedConfigured()) {
             try {
               const provider = createEmbeddingProvider(() => getFirebaseIdToken());
-              const chunks = chunkText(text.slice(0, MAX_INDEX_CHARS));
-              await embedAndStoreChunks({
+              const chunks = buildEmbeddingChunks(f.name, text.slice(0, MAX_INDEX_CHARS));
+              const embedding = await embedAndStoreChunks({
                 provider,
                 fileId: f.id,
                 chunks,
                 corpusKey,
                 driveModifiedTime: f.modifiedTime,
               });
+              if (embedding.failed) embeddingFail++;
             } catch (ve) {
               console.warn('[SemanticSearch] vector embed skipped', f.id, ve);
+              embeddingFail++;
             }
           }
           ok++;
@@ -270,6 +281,7 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
       clearCursor();
       setIndexProgress(
         `Done: ${ok} indexed, ${skippedFresh} already fresh, ${fail} failed` +
+          (embeddingFail ? `, ${embeddingFail} embedding failed` : '') +
           (truncated ? `, ${truncated} truncated` : '') +
           (failedNames.length
             ? `. Failed: ${failedNames.join(', ')}${fail > failedNames.length ? '\u2026' : ''}`
@@ -342,6 +354,11 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
         </div>
         {indexProgress && (
           <p className="text-[11px] text-zinc-500 font-mono break-all">{indexProgress}</p>
+        )}
+        {searchStatus && query.trim() && (
+          <p className={`text-[11px] font-medium ${searchStatus.includes('unavailable') ? 'text-amber-600' : 'text-emerald-600'}`}>
+            {searchStatus}
+          </p>
         )}
       </div>
 

@@ -70,7 +70,7 @@ export class BackendEmbeddingProvider implements EmbeddingProvider {
       throw new EmbedAuthError('Sign in required to generate embeddings');
     }
 
-    const body: EmbedRequest = { texts: cleaned, mode };
+    const body: EmbedRequest = { texts: cleaned, mode, version: EMBED_CONFIG.version };
     const res = await fetch(EMBED_CONFIG.endpoint, {
       method: 'POST',
       headers: {

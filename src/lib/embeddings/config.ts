@@ -20,7 +20,7 @@ function readEmbedEndpoint(): string {
 
 /** Canonical model id — keep in sync with workers/embed wrangler default. */
 export const EMBED_MODEL_ID = 'gemini-embedding-2' as const;
-export const EMBED_VERSION = '2' as const;
+export const EMBED_VERSION = '3' as const;
 export const EMBED_DIMENSION = 768 as const;
 
 export const EMBED_CONFIG = {

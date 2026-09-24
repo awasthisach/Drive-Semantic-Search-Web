@@ -4,7 +4,7 @@
  */
 import { DriveFile, SemanticSearchResult } from '../types';
 import { searchContentIndex } from './contentIndex';
-import { expandTerms } from './queryExpand';
+import { expandSemanticQueries, expandTerms } from './queryExpand';
 import { isEmbedConfigured } from './embeddings/config';
 import { createEmbeddingProvider } from './embeddings/client';
 import { getFirebaseIdToken } from './firebaseAuth';
@@ -78,25 +78,44 @@ export function neuralToDisplayScore(cosine: number): number {
 async function tryNeuralSearch(
   query: string,
   corpusKey: string | undefined,
-  liveFileIds: Set<string>
+  liveFileIds: Set<string>,
+  onStatus?: (message: string) => void
 ): Promise<Map<string, { score: number; snippet: string }> | null> {
   if (!isEmbedConfigured() || !corpusKey || !query.trim()) return null;
   try {
     const provider = createEmbeddingProvider(() => getFirebaseIdToken());
-    const qVec = await provider.embedQuery(query.trim());
-    if (!qVec.length) return null;
-    const hits = await searchNeuralByEmbedding(qVec, corpusKey, {
-      minScore: 0.22,
-      topK: 80,
-      liveFileIds,
-    });
     const out = new Map<string, { score: number; snippet: string }>();
-    for (const h of hits) {
-      out.set(h.fileId, { score: h.score, snippet: h.snippet });
+    const variants = expandSemanticQueries(query);
+    let succeeded = 0;
+    for (const variant of variants) {
+      try {
+        const qVec = await provider.embedQuery(variant);
+        if (!qVec.length) continue;
+        succeeded++;
+        const hits = await searchNeuralByEmbedding(qVec, corpusKey, {
+          minScore: -1,
+          topK: 200,
+          liveFileIds,
+        });
+        for (const h of hits) {
+          const prev = out.get(h.fileId);
+          if (!prev || h.score > prev.score) {
+            out.set(h.fileId, { score: h.score, snippet: h.snippet });
+          }
+        }
+      } catch (variantError) {
+        console.warn('[searchEngine] neural variant failed', variant, variantError);
+      }
     }
+    if (!succeeded) {
+      onStatus?.('Neural search unavailable; showing BM25 and metadata matches.');
+      return null;
+    }
+    onStatus?.('Neural search active.');
     return out;
   } catch (e) {
     console.warn('[searchEngine] neural search failed; BM25/metadata only', e);
+    onStatus?.('Neural search unavailable; showing BM25 and metadata matches.');
     return null;
   }
 }
@@ -105,7 +124,8 @@ export async function runHybridSearch(
   query: string,
   files: DriveFile[],
   filterCategory?: string,
-  corpusKey?: string
+  corpusKey?: string,
+  onNeuralStatus?: (message: string) => void
 ): Promise<SemanticSearchResult[]> {
   const filtered = files.filter(file => {
     if (!filterCategory || filterCategory === 'all') return true;
@@ -125,7 +145,7 @@ export async function runHybridSearch(
   const liveIds = new Set(filtered.map(f => f.id));
   const [contentHits, neuralHits] = await Promise.all([
     searchContentIndex(query, corpusKey),
-    tryNeuralSearch(query, corpusKey, liveIds),
+    tryNeuralSearch(query, corpusKey, liveIds, onNeuralStatus),
   ]);
 
   const results: SemanticSearchResult[] = [];

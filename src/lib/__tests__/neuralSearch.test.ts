@@ -26,7 +26,7 @@ function rec(
     corpusKey: 'user',
     contentHash: 'h' + idx,
     embeddingModel: 'gemini-embedding-2',
-    embeddingVersion: '2',
+    embeddingVersion: '3',
     dimension: 768,
     indexedAt: new Date().toISOString(),
   };
@@ -82,6 +82,13 @@ describe('rankVectorsByQueryEmbedding', () => {
     expect(hits.length).toBe(1);
     expect(hits[0].chunkIdx).toBe(1);
     expect(hits[0].snippet).toContain('strong match');
+  });
+
+  it('does not discard a valid low-cosine vector by default', () => {
+    const q = vec(11);
+    const low = rec('low', 0, vec(12), 'lower semantic similarity');
+    const hits = rankVectorsByQueryEmbedding(q, [low]);
+    expect(hits).toHaveLength(1);
   });
 });
 

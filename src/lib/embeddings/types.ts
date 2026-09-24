@@ -18,6 +18,8 @@ export type EmbedInputMode = 'document' | 'query';
 export interface EmbedRequest {
   texts: string[];
   mode: EmbedInputMode;
+  /** Allows the Worker to serve legacy and current clients during rollout. */
+  version?: string;
 }
 
 export interface EmbedResponse {
