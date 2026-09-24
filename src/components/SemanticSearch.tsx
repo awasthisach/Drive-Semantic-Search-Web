@@ -16,6 +16,7 @@ import {
 import { highlightSegments } from '../lib/searchHighlight';
 import { embedAndStoreChunks, hasCompatibleVectorSet } from '../lib/vectorIndex';
 import { isEmbedConfigured } from '../lib/embeddings/config';
+import { EMBED_CONFIG } from '../lib/embeddings/config';
 import { createEmbeddingProvider } from '../lib/embeddings/client';
 import { getFirebaseIdToken } from '../lib/firebaseAuth';
 
@@ -338,7 +339,7 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
             className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-indigo-600 text-white font-bold disabled:opacity-50"
           >
             {indexing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Database className="w-3.5 h-3.5" />}
-            {indexing ? 'Indexing\u2026' : resumeFrom > 0 ? `Resume indexing (${resumeFrom}+)` : 'Index extractable content'}
+            {indexing ? 'Indexing\u2026' : resumeFrom > 0 ? `Resume v${EMBED_CONFIG.version} indexing (${resumeFrom}+)` : `Build v${EMBED_CONFIG.version} semantic index`}
           </button>
           {indexing && (
             <button
@@ -380,7 +381,7 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
                 onClick={handleIndexContent}
                 className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-bold"
               >
-                {indexing ? 'Indexing\u2026' : resumeFrom > 0 ? `Resume indexing (${resumeFrom}+)` : 'Index extractable content'}
+                {indexing ? 'Indexing\u2026' : resumeFrom > 0 ? `Resume v${EMBED_CONFIG.version} indexing (${resumeFrom}+)` : `Build v${EMBED_CONFIG.version} semantic index`}
               </button>
             </div>
           ) : (

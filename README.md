@@ -18,7 +18,7 @@ Client-side web app for Google Drive: sync, **hybrid search** (neural cosine + B
 - **Hybrid search**
   - **Metadata** — filename, summary, tags (exact name boost)
   - **BM25 body** — IndexedDB postings over extracted Drive text
-  - **Neural (optional)** — Gemini Embedding 2 (768 dimensions, compatibility version 2) via authenticated Worker → cosine over chunk vectors → hybrid blend
+  - **Neural (optional)** — Gemini Embedding 2 (768 dimensions, compatibility version 3) via authenticated Worker → cosine over chunk vectors → hybrid blend
   - Highlight chips, match reasons, Star / Pin offline / Copy link on results
   - Hindi/Hinglish query expansion (lightweight pairs; preserves Devanagari combining marks)
 - **Content + vector index** — IndexedDB BM25 docs/chunks/postings **and** separate vector store; content-hash skip re-embed; cancel + progress; **resume cursor** (SHA-256 signature of corpus file list)
@@ -106,7 +106,7 @@ Production Worker URL (public, not a secret):
 
 The SPA defaults to this URL. CI uses repository secret `VITE_EMBED_ENDPOINT` when set, otherwise the same default.
 
-Worker must run **`workers/embed/src/index.ts`** (JSON `{ embeddings, model, version, dimension }`, with version `2`). A dashboard stub that returns plain `Unauthorized` will not work. Worker deployment is controlled by `.github/workflows/deploy-worker.yml` and requires `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` GitHub secrets.
+Worker must run **`workers/embed/src/index.ts`** (JSON `{ embeddings, model, version, dimension }`, with version `3`). A dashboard stub that returns plain `Unauthorized` will not work. Worker deployment is controlled by `.github/workflows/deploy-worker.yml` and requires `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` GitHub secrets.
 
 Required Worker secrets/vars:
 
@@ -115,12 +115,13 @@ Required Worker secrets/vars:
 - CORS origin default: `https://awasthisach.github.io`
 - Model `gemini-embedding-2`, dimension `768`, embedding compatibility version `2`
 
-After Worker + Pages are aligned:
+### Fresh v3 re-index and acceptance
 
-1. Sign in on the live app
-2. **Index extractable content** (writes BM25 + vectors)
-3. Query cross-language cases (e.g. `बेरोजगारी` vs English “employment / joblessness” docs)
-4. Confirm exact filename still ranks; embed downtime still returns BM25 results
+After Worker + Pages are aligned, sign in on the live app and select **Build v3 semantic index**. The indexer is resumable and automatically re-embeds any document whose stored vector is not compatible with model `gemini-embedding-2`, version `3`, and dimension `768`; it preserves valid vectors if an upstream request fails. Run it to completion for the selected corpus before evaluating search.
+
+Acceptance queries should include `cannabis`, `hemp`, `bhang`, `भांग`, and `कैनबिस`, plus a filename-only query for a known document. Record the top result, whether the filename/body match is expected, and whether the UI reports neural search as active. Temporarily making the Worker unavailable should leave BM25 + metadata results visible rather than failing the search.
+
+The live contract verifier also checks authenticated v3 query/document requests and an unauthenticated legacy request. A successful CI build alone is not proof of live Drive recall: the corpus must be freshly indexed and the original failing files must be checked in the signed-in browser.
 
 **Live multilingual proof cannot be claimed from unit tests alone.**
 
@@ -145,7 +146,7 @@ After Worker + Pages are aligned:
 - Content-index prune is corpus-scoped and skipped when list is truncated
 - Race-free durable meta + hash snapshot persist
 - Embed API failure keeps prior valid vectors; search falls back without neural
-- Version-1 vectors are incompatible and are migrated only after successful version-2 re-embedding
+- Version-1 and version-2 vectors are incompatible and are migrated only after successful version-3 re-embedding
 
 ---
 
