@@ -12,14 +12,14 @@ const expectedModel = 'gemini-embedding-2';
 const expectedVersion = '3';
 const expectedDimension = 768;
 
-async function verify(mode, texts) {
+async function verify(mode, texts, version, expectedVersion = version) {
   const response = await fetch(endpoint, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ texts, mode }),
+    body: JSON.stringify({ texts, mode, ...(version ? { version } : {}) }),
   });
   const body = await response.json().catch(() => null);
   if (!response.ok) throw new Error(`Live ${mode} embed contract returned HTTP ${response.status}`);
@@ -36,6 +36,7 @@ async function verify(mode, texts) {
   }
 }
 
-await verify('query', ['cannabis']);
-await verify('document', ['title: Hemp Research.pdf | text: controlled contract probe']);
-console.log(`Live embed contract passed: model=${expectedModel}, version=${expectedVersion}, dimension=${expectedDimension}`);
+await verify('query', ['cannabis'], '3');
+await verify('document', ['title: Hemp Research.pdf | text: controlled contract probe'], '3');
+await verify('query', ['legacy compatibility probe'], undefined, '2');
+console.log(`Live embed contract passed: v3 query/document and legacy v2 compatibility; model=${expectedModel}, dimension=${expectedDimension}`);

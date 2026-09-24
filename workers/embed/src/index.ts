@@ -243,6 +243,7 @@ export default {
     }
     const textsRaw = (body as { texts?: unknown }).texts;
     const modeRaw = (body as { mode?: unknown }).mode;
+    const versionRaw = (body as { version?: unknown }).version;
     if (!Array.isArray(textsRaw) || !textsRaw.length) {
       return json({ error: 'texts required' }, 400, corsOrigin);
     }
@@ -279,6 +280,12 @@ export default {
       return json({ error: 'invalid mode' }, 400, corsOrigin);
     }
 
+    // No version means a legacy v2 client. During rollout, serve both contracts.
+    const responseVersion = versionRaw === undefined ? '2' : String(versionRaw);
+    if (responseVersion !== '2' && responseVersion !== '3') {
+      return json({ error: 'unsupported contract version' }, 400, corsOrigin);
+    }
+
     const result = await callGeminiEmbed(env, model, dimension, texts, mode);
     if (!result.ok) {
       return json({ error: 'upstream embed failed', status: result.status }, 502, corsOrigin);
@@ -297,7 +304,7 @@ export default {
       {
         embeddings: result.embeddings,
         model,
-        version: '3',
+        version: responseVersion,
         dimension,
       },
       200,

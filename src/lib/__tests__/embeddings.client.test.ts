@@ -26,7 +26,7 @@ describe('BackendEmbeddingProvider', () => {
 
     const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
     const body = JSON.parse(String(init.body));
-    expect(body).toEqual({ texts: ['document body'], mode: 'document' });
+    expect(body).toEqual({ texts: ['document body'], mode: 'document', version: EMBED_CONFIG.version });
     expect(body.taskType).toBeUndefined();
     expect((init.headers as Record<string, string>).Authorization).toBe('Bearer firebase-token');
   });
@@ -37,7 +37,7 @@ describe('BackendEmbeddingProvider', () => {
     await provider.embedQuery('search phrase');
 
     const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
-    expect(JSON.parse(String(init.body))).toEqual({ texts: ['search phrase'], mode: 'query' });
+    expect(JSON.parse(String(init.body))).toEqual({ texts: ['search phrase'], mode: 'query', version: EMBED_CONFIG.version });
   });
 
   it('rejects a response from a stale embedding version', async () => {

@@ -9,7 +9,7 @@ The Worker calls **Gemini Embedding 2** with `outputDimensionality = 768`. Gemin
 - Query: `task: search result | query: {query text}`
 - Document: `{title-aware document chunk}` (for example, `title: report.pdf | text: ...`)
 
-Successful responses contain `{ embeddings, model, version: "3", dimension: 768 }`. The SPA rejects mismatched model, version, dimension, or batch length responses. Version 3 is intentionally incompatible with older vectors because document chunks now include the filename; the browser re-embeds them before using them for neural ranking.
+Successful v3 responses contain `{ embeddings, model, version: "3", dimension: 768 }`. The request carries `version: "3"`; legacy clients that omit `version` receive a v2 response during the rollout window. The SPA rejects mismatched model, version, dimension, or batch length responses. Version 3 is intentionally incompatible with older vectors because document chunks now include the filename; the browser re-embeds them before using them for neural ranking. This negotiation makes Worker-first deployment safe for the still-live v2 SPA.
 
 ## Security controls
 
