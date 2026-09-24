@@ -119,7 +119,8 @@ jobs:
       - name: Verify authenticated live embed contract
         env:
           EMBED_ENDPOINT: ${{ secrets.VITE_EMBED_ENDPOINT || 'https://drive-semantic-embed.awasthi-sach.workers.dev' }}
-          FIREBASE_TEST_ID_TOKEN: ${{ secrets.FIREBASE_TEST_ID_TOKEN }}
+          FIREBASE_TEST_EMAIL: ${{ secrets.FIREBASE_TEST_EMAIL }}
+          FIREBASE_TEST_PASSWORD: ${{ secrets.FIREBASE_TEST_PASSWORD }}
         run: node ../../scripts/verify-live-contract.mjs
 
   deploy-pages:

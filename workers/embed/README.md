@@ -36,7 +36,7 @@ npm run check
 npm run deploy
 ```
 
-The main deployment workflow performs the Worker dry run, deploys the Worker, and runs an authenticated live contract check before GitHub Pages deployment. It requires the GitHub Actions secrets `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, and `FIREBASE_TEST_ID_TOKEN`; values are never committed or printed. The separate `.github/workflows/deploy-worker.yml` is manual-only to prevent a second automatic Worker deployment racing the ordered main workflow.
+The main deployment workflow performs the Worker dry run, deploys the Worker, and runs an authenticated live contract check before GitHub Pages deployment. It requires the GitHub Actions secrets `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `FIREBASE_TEST_EMAIL`, and `FIREBASE_TEST_PASSWORD`; the verifier mints a fresh short-lived Firebase ID token at run time, so no expiring ID token is stored. The separate `.github/workflows/deploy-worker.yml` is manual-only to prevent a second automatic Worker deployment racing the ordered main workflow.
 
 ## SPA integration
 

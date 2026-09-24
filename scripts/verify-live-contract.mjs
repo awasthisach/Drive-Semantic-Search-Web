@@ -1,12 +1,49 @@
+import { readFile } from 'node:fs/promises';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 const endpoint = (process.env.EMBED_ENDPOINT || '').replace(/\/$/, '');
-const token = process.env.FIREBASE_TEST_ID_TOKEN || '';
 
 if (!endpoint || !/^https:\/\//.test(endpoint)) {
   throw new Error('EMBED_ENDPOINT must be an HTTPS URL');
 }
-if (!token) {
-  throw new Error('FIREBASE_TEST_ID_TOKEN GitHub secret is required for the live contract gate');
+async function getFirebaseIdToken() {
+  if (process.env.FIREBASE_TEST_ID_TOKEN) return process.env.FIREBASE_TEST_ID_TOKEN;
+
+  const email = process.env.FIREBASE_TEST_EMAIL || '';
+  const password = process.env.FIREBASE_TEST_PASSWORD || '';
+  if (!email || !password) {
+    throw new Error('Set FIREBASE_TEST_ID_TOKEN or FIREBASE_TEST_EMAIL and FIREBASE_TEST_PASSWORD');
+  }
+
+  let apiKey = process.env.FIREBASE_API_KEY || '';
+  if (!apiKey) {
+    const configPath = resolve(dirname(fileURLToPath(import.meta.url)), '../firebase-applet-config.json');
+    const config = JSON.parse(await readFile(configPath, 'utf8'));
+    apiKey = config.apiKey || '';
+  }
+  if (!apiKey) throw new Error('Firebase public API key is missing');
+
+  const response = await fetch(
+    `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${encodeURIComponent(apiKey)}`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Referer: 'https://awasthisach.github.io/Drive-Semantic-Search-Web/',
+      },
+      body: JSON.stringify({ email, password, returnSecureToken: true }),
+    }
+  );
+  const body = await response.json().catch(() => null);
+  if (!response.ok || !body?.idToken) {
+    const code = body?.error?.message || `HTTP_${response.status}`;
+    throw new Error(`Firebase test-user sign-in failed: ${code}`);
+  }
+  return body.idToken;
 }
+
+const token = await getFirebaseIdToken();
 
 const expectedModel = 'gemini-embedding-2';
 const expectedVersion = '3';
