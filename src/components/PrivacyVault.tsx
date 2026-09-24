@@ -37,18 +37,22 @@ export const PrivacyVault: React.FC<PrivacyVaultProps> = ({
       return;
     }
 
-    // Existing vaults must be verified before opening. A fresh vault has no
-    // verifier yet, so the first passphrase becomes its passphrase.
+    // Existing vaults may contain items created before passphrase verification
+    // was enforced. Try each item so one damaged/mismatched newest item cannot
+    // lock out older valid items.
     if (vaultFiles.length > 0) {
-      try {
-        await decryptDataWithWorker(
-          vaultFiles[0].encryptedData,
-          vaultFiles[0].iv,
-          vaultFiles[0].salt,
-          inputPass
-        );
-      } catch {
-        setErrorMsg('Incorrect vault passphrase or damaged vault item');
+      let verified = false;
+      for (const file of vaultFiles) {
+        try {
+          await decryptDataWithWorker(file.encryptedData, file.iv, file.salt, inputPass);
+          verified = true;
+          break;
+        } catch {
+          // Try the next persisted item.
+        }
+      }
+      if (!verified) {
+        setErrorMsg('Incorrect vault passphrase or no vault item could be decrypted');
         return;
       }
     }
