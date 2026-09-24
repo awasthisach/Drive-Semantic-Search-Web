@@ -14,7 +14,7 @@ import {
   chunkText,
 } from '../lib/contentIndex';
 import { highlightSegments } from '../lib/searchHighlight';
-import { embedAndStoreChunks } from '../lib/vectorIndex';
+import { embedAndStoreChunks, hasCompatibleVectorSet } from '../lib/vectorIndex';
 import { isEmbedConfigured } from '../lib/embeddings/config';
 import { createEmbeddingProvider } from '../lib/embeddings/client';
 import { getFirebaseIdToken } from '../lib/firebaseAuth';
@@ -192,6 +192,33 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
       try {
         const existing = await getIndexedDocument(f.id);
         if (!isDocumentStale(existing, f.modifiedTime)) {
+          if (isEmbedConfigured() && existing?.text) {
+            const provider = createEmbeddingProvider(() => getFirebaseIdToken());
+            const chunks = chunkText(existing.text);
+            const compatible = await hasCompatibleVectorSet({
+              fileId: f.id,
+              corpusKey,
+              chunks,
+              embeddingModel: provider.embeddingModel,
+              embeddingVersion: provider.embeddingVersion,
+              dimension: provider.dimension,
+            });
+            if (!compatible) {
+              setIndexProgress(`Migrating embeddings ${i + 1}/${extractable.length}: ${f.name}`);
+              const migration = await embedAndStoreChunks({
+                provider,
+                fileId: f.id,
+                chunks,
+                corpusKey,
+                driveModifiedTime: f.modifiedTime,
+              });
+              if (migration.failed) {
+                fail++;
+                if (failedNames.length < 20) failedNames.push(f.name);
+                continue;
+              }
+            }
+          }
           skippedFresh++;
           writeCursor(sig, i + 1);
           continue;

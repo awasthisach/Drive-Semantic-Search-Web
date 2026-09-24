@@ -13,11 +13,11 @@ export interface EmbeddingProvider extends EmbeddingMeta {
   embedQuery(text: string): Promise<number[]>;
 }
 
-export type EmbedTaskType = 'RETRIEVAL_DOCUMENT' | 'RETRIEVAL_QUERY';
+export type EmbedInputMode = 'document' | 'query';
 
 export interface EmbedRequest {
   texts: string[];
-  taskType?: EmbedTaskType;
+  mode: EmbedInputMode;
 }
 
 export interface EmbedResponse {

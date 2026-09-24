@@ -18,7 +18,7 @@ Client-side web app for Google Drive: sync, **hybrid search** (neural cosine + B
 - **Hybrid search**
   - **Metadata** — filename, summary, tags (exact name boost)
   - **BM25 body** — IndexedDB postings over extracted Drive text
-  - **Neural (optional)** — Gemini embeddings via authenticated Worker → cosine over chunk vectors → hybrid blend
+  - **Neural (optional)** — Gemini Embedding 2 (768 dimensions, compatibility version 2) via authenticated Worker → cosine over chunk vectors → hybrid blend
   - Highlight chips, match reasons, Star / Pin offline / Copy link on results
   - Hindi/Hinglish query expansion (lightweight pairs; preserves Devanagari combining marks)
 - **Content + vector index** — IndexedDB BM25 docs/chunks/postings **and** separate vector store; content-hash skip re-embed; cancel + progress; **resume cursor** (SHA-256 signature of corpus file list)
@@ -106,14 +106,14 @@ Production Worker URL (public, not a secret):
 
 The SPA defaults to this URL. CI uses repository secret `VITE_EMBED_ENDPOINT` when set, otherwise the same default.
 
-Worker must run **`workers/embed/src/index.ts`** (JSON `{ embeddings, model, version, dimension }`). A dashboard stub that returns plain `Unauthorized` will not work.
+Worker must run **`workers/embed/src/index.ts`** (JSON `{ embeddings, model, version, dimension }`, with version `2`). A dashboard stub that returns plain `Unauthorized` will not work. Worker deployment is controlled by `.github/workflows/deploy-worker.yml` and requires `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` GitHub secrets.
 
 Required Worker secrets/vars:
 
 - Secret `GEMINI_API_KEY`
 - Variable or secret `FIREBASE_PROJECT_ID=thevvforg`
 - CORS origin default: `https://awasthisach.github.io`
-- Model `gemini-embedding-2`, dimension `768`
+- Model `gemini-embedding-2`, dimension `768`, embedding compatibility version `2`
 
 After Worker + Pages are aligned:
 
@@ -145,6 +145,7 @@ After Worker + Pages are aligned:
 - Content-index prune is corpus-scoped and skipped when list is truncated
 - Race-free durable meta + hash snapshot persist
 - Embed API failure keeps prior valid vectors; search falls back without neural
+- Version-1 vectors are incompatible and are migrated only after successful version-2 re-embedding
 
 ---
 

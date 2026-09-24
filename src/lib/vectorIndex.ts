@@ -72,7 +72,32 @@ export function isCompatibleVector(
   );
 }
 
-export async function getVectorsForFile(fileId: string): Promise<VectorRecord[]> {
+export async function hasCompatibleVectorSet(opts: {
+  fileId: string;
+  corpusKey: string;
+  chunks: string[];
+  embeddingModel?: string;
+  embeddingVersion?: string;
+  dimension?: number;
+}): Promise<boolean> {
+  const model = opts.embeddingModel ?? EMBED_CONFIG.model;
+  const version = opts.embeddingVersion ?? EMBED_CONFIG.version;
+  const dimension = opts.dimension ?? EMBED_CONFIG.dimension;
+  const vectors = await getVectorsForFile(opts.fileId, opts.corpusKey);
+  const byIdx = new Map(vectors.map(v => [v.idx, v]));
+  const nonEmpty = opts.chunks.filter(chunk => Boolean(chunk && chunk.trim()));
+  if (vectors.length !== nonEmpty.length) return false;
+  for (let idx = 0; idx < opts.chunks.length; idx++) {
+    const text = opts.chunks[idx];
+    if (!text || !text.trim()) continue;
+    const hash = await hashContent(text);
+    const rec = byIdx.get(idx);
+    if (!rec || !isCompatibleVector(rec, hash, model, version, dimension)) return false;
+  }
+  return true;
+}
+
+export async function getVectorsForFile(fileId: string, corpusKey?: string): Promise<VectorRecord[]> {
   try {
     const db = await openDb();
     return new Promise((resolve, reject) => {
@@ -81,7 +106,10 @@ export async function getVectorsForFile(fileId: string): Promise<VectorRecord[]>
         .objectStore(VECTOR_STORE)
         .index('fileId')
         .getAll(fileId);
-      req.onsuccess = () => resolve((req.result || []) as VectorRecord[]);
+      req.onsuccess = () => {
+        const rows = (req.result || []) as VectorRecord[];
+        resolve(corpusKey ? rows.filter(v => v.corpusKey === corpusKey) : rows);
+      };
       req.onerror = () => reject(req.error);
     });
   } catch {
@@ -113,10 +141,7 @@ export async function removeVectorsForFile(
   corpusKey?: string
 ): Promise<number> {
   try {
-    let existing = await getVectorsForFile(fileId);
-    if (corpusKey) {
-      existing = existing.filter(v => v.corpusKey === corpusKey);
-    }
+    const existing = await getVectorsForFile(fileId, corpusKey);
     if (!existing.length) return 0;
     const db = await openDb();
     await new Promise<void>((resolve, reject) => {
@@ -148,7 +173,7 @@ export async function embedAndStoreChunks(opts: {
     throw new Error(`Vector dimension ${dimension} != configured ${EMBED_CONFIG.dimension}`);
   }
 
-  const existing = await getVectorsForFile(fileId);
+  const existing = await getVectorsForFile(fileId, corpusKey);
   const byIdx = new Map(existing.map(v => [v.idx, v]));
 
   const toEmbed: { idx: number; text: string; contentHash: string }[] = [];
@@ -187,7 +212,7 @@ export async function embedAndStoreChunks(opts: {
         }
         const b = batch[j];
         newRecords.push({
-          id: fileId + '#' + b.idx,
+          id: corpusKey + '::' + fileId + '#' + b.idx,
           fileId,
           idx: b.idx,
           text: b.text.slice(0, 2000),
@@ -213,6 +238,11 @@ export async function embedAndStoreChunks(opts: {
       const tx = db.transaction(VECTOR_STORE, 'readwrite');
       for (const rec of newRecords) {
         tx.objectStore(VECTOR_STORE).put(rec);
+      }
+      for (const prev of existing) {
+        if (!newRecords.some(rec => rec.id === prev.id)) {
+          tx.objectStore(VECTOR_STORE).delete(prev.id);
+        }
       }
       const maxIdx = chunks.length;
       for (const prev of existing) {
