@@ -106,7 +106,7 @@ Production Worker URL (public, not a secret):
 
 The SPA defaults to this URL. CI uses repository secret `VITE_EMBED_ENDPOINT` when set, otherwise the same default.
 
-Worker must run **`workers/embed/src/index.ts`** (JSON `{ embeddings, model, version, dimension }`, with version `2`). A dashboard stub that returns plain `Unauthorized` will not work. Worker deployment is controlled by `.github/workflows/deploy-worker.yml` and requires `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` GitHub secrets.
+Worker must run **`workers/embed/src/index.ts`** (JSON `{ embeddings, model, version, dimension }`, with version `3`). A dashboard stub that returns plain `Unauthorized` will not work. Worker deployment is controlled by `.github/workflows/deploy-worker.yml` and requires `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` GitHub secrets.
 
 Required Worker secrets/vars:
 
@@ -145,7 +145,7 @@ After Worker + Pages are aligned:
 - Content-index prune is corpus-scoped and skipped when list is truncated
 - Race-free durable meta + hash snapshot persist
 - Embed API failure keeps prior valid vectors; search falls back without neural
-- Version-1 vectors are incompatible and are migrated only after successful version-2 re-embedding
+- Version-1 and version-2 vectors are incompatible and are migrated only after successful version-3 re-embedding
 
 ---
 
