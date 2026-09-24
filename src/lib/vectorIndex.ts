@@ -301,8 +301,8 @@ export function rankVectorsByQueryEmbedding(
   const model = opts?.embeddingModel ?? EMBED_CONFIG.model;
   const version = opts?.embeddingVersion ?? EMBED_CONFIG.version;
   const dimension = opts?.dimension ?? EMBED_CONFIG.dimension;
-  const minScore = opts?.minScore ?? 0.25;
-  const topK = opts?.topK ?? 50;
+  const minScore = opts?.minScore ?? -1;
+  const topK = opts?.topK ?? 200;
   const live = opts?.liveFileIds;
 
   if (!queryEmbedding.length || queryEmbedding.length !== dimension) {

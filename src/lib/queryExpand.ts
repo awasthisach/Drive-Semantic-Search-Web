@@ -11,6 +11,14 @@ const PAIRS: [string, string][] = [
   ['document', 'दस्तावेज़'],
 ];
 
+const SEMANTIC_VARIANTS: Record<string, string[]> = {
+  cannabis: ['cannabis', 'hemp', 'bhang', 'भांग', 'कैनबिस'],
+  hemp: ['hemp', 'cannabis', 'bhang', 'भांग', 'कैनबिस'],
+  bhang: ['bhang', 'cannabis', 'hemp', 'भांग', 'कैनबिस'],
+  भांग: ['भांग', 'bhang', 'cannabis', 'hemp', 'कैनबिस'],
+  कैनबिस: ['कैनबिस', 'cannabis', 'hemp', 'bhang', 'भांग'],
+};
+
 /** term → all alternate forms (latin ↔ devanagari). */
 const LOOKUP = new Map<string, Set<string>>();
 function addAlt(from: string, to: string) {
@@ -39,4 +47,27 @@ export function expandTerms(query: string): string[] {
     if (alts) for (const a of alts) out.add(a);
   }
   return [...out];
+}
+
+/** Return a bounded set of high-confidence whole-query neural variants. */
+export function expandSemanticQueries(query: string): string[] {
+  const trimmed = query.trim();
+  if (!trimmed) return [];
+
+  const rawTerms = trimmed
+    .toLowerCase()
+    .split(/\s+/)
+    .map(t => t.replace(/[^\p{L}\p{M}\p{N}_-]/gu, ''))
+    .filter(Boolean);
+  const variants = new Set<string>([trimmed]);
+
+  for (const term of rawTerms) {
+    const aliases = SEMANTIC_VARIANTS[term];
+    if (!aliases) continue;
+    for (const alias of aliases) {
+      variants.add(rawTerms.map(current => (current === term ? alias : current)).join(' '));
+    }
+  }
+
+  return [...variants].slice(0, 8);
 }

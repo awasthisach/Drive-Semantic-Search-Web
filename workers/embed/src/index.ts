@@ -147,10 +147,7 @@ async function callGeminiEmbed(
     model: 'models/' + model,
     content: {
       parts: [{
-        text:
-          mode === 'query'
-            ? 'task: search result | query: ' + text
-            : 'title: none | text: ' + text,
+        text: mode === 'query' ? 'task: search result | query: ' + text : text,
       }],
     },
     outputDimensionality: dimension,
@@ -300,7 +297,7 @@ export default {
       {
         embeddings: result.embeddings,
         model,
-        version: '2',
+        version: '3',
         dimension,
       },
       200,

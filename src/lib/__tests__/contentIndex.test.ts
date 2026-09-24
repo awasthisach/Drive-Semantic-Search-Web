@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import * as contentIndex from '../contentIndex';
-import { chunkText, tokenize, searchContentIndex } from '../contentIndex';
+import { buildEmbeddingChunks, chunkText, tokenize, searchContentIndex } from '../contentIndex';
 
 describe('chunkText', () => {
   it('returns empty for blank', () => {
@@ -28,6 +28,14 @@ describe('tokenize', () => {
 
   it('drops short tokens', () => {
     expect(tokenize('a bb ccc')).toEqual(['bb', 'ccc']);
+  });
+});
+
+describe('buildEmbeddingChunks', () => {
+  it('includes the filename in every embedding chunk', () => {
+    const chunks = buildEmbeddingChunks('Hemp Research.pdf', 'A short body');
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0]).toBe('title: Hemp Research.pdf | text: A short body');
   });
 });
 

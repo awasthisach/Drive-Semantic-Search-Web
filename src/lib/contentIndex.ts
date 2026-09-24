@@ -88,6 +88,12 @@ export function chunkText(text: string): string[] {
   return chunks;
 }
 
+/** Representation shared by BM25 and neural indexing; title is a semantic signal. */
+export function buildEmbeddingChunks(name: string, text: string): string[] {
+  const title = (name || 'Untitled file').trim();
+  return chunkText(text).map(chunk => `title: ${title} | text: ${chunk}`);
+}
+
 export function tokenize(text: string): string[] {
   return text
     .toLowerCase()
