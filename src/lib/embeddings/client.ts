@@ -36,17 +36,17 @@ export class BackendEmbeddingProvider implements EmbeddingProvider {
   constructor(private readonly getIdToken: () => Promise<string | null>) {}
 
   async embedDocuments(texts: string[]): Promise<number[][]> {
-    return this.embed(texts, 'RETRIEVAL_DOCUMENT');
+    return this.embed(texts, 'document');
   }
 
   async embedQuery(text: string): Promise<number[]> {
-    const rows = await this.embed([text], 'RETRIEVAL_QUERY');
+    const rows = await this.embed([text], 'query');
     return rows[0] || [];
   }
 
   private async embed(
     texts: string[],
-    taskType: EmbedRequest['taskType']
+    mode: EmbedRequest['mode']
   ): Promise<number[][]> {
     if (!isEmbedConfigured()) {
       throw new EmbedConfigError(
@@ -70,7 +70,7 @@ export class BackendEmbeddingProvider implements EmbeddingProvider {
       throw new EmbedAuthError('Sign in required to generate embeddings');
     }
 
-    const body: EmbedRequest = { texts: cleaned, taskType };
+    const body: EmbedRequest = { texts: cleaned, mode };
     const res = await fetch(EMBED_CONFIG.endpoint, {
       method: 'POST',
       headers: {
@@ -96,15 +96,25 @@ export class BackendEmbeddingProvider implements EmbeddingProvider {
       throw new EmbedApiError(502, 'Embed response length mismatch');
     }
     for (const row of data.embeddings) {
-      if (!Array.isArray(row) || row.length !== EMBED_CONFIG.dimension) {
+      if (
+        !Array.isArray(row) ||
+        row.length !== EMBED_CONFIG.dimension ||
+        row.some(value => !Number.isFinite(value))
+      ) {
         throw new EmbedApiError(
           502,
           `Embed dimension mismatch (expected ${EMBED_CONFIG.dimension}, got ${Array.isArray(row) ? row.length : 0})`
         );
       }
     }
-    if (data.model && data.model !== EMBED_CONFIG.model) {
+    if (data.model !== EMBED_CONFIG.model) {
       throw new EmbedApiError(502, `Embed model mismatch (expected ${EMBED_CONFIG.model}, got ${data.model})`);
+    }
+    if (data.version !== EMBED_CONFIG.version) {
+      throw new EmbedApiError(502, `Embed version mismatch (expected ${EMBED_CONFIG.version}, got ${data.version})`);
+    }
+    if (data.dimension !== EMBED_CONFIG.dimension) {
+      throw new EmbedApiError(502, `Embed dimension metadata mismatch (expected ${EMBED_CONFIG.dimension}, got ${data.dimension})`);
     }
     return data.embeddings;
   }

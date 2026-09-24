@@ -11,6 +11,7 @@ export interface Env {
   EMBED_DIMENSION?: string;
   MAX_TEXTS?: string;
   MAX_CHARS?: string;
+  MAX_BODY_BYTES?: string;
   ALLOWED_ORIGIN?: string;
   RATE_LIMIT_PER_MIN?: string;
 }
@@ -135,18 +136,23 @@ async function callGeminiEmbed(
   model: string,
   dimension: number,
   texts: string[],
-  taskType: string
+  mode: 'query' | 'document'
 ): Promise<{ ok: true; embeddings: number[][] } | { ok: false; status: number }> {
   const url =
     'https://generativelanguage.googleapis.com/v1beta/models/' +
     encodeURIComponent(model) +
-    ':batchEmbedContents?key=' +
-    encodeURIComponent(env.GEMINI_API_KEY);
+    ':batchEmbedContents';
 
   const requests = texts.map(text => ({
     model: 'models/' + model,
-    content: { parts: [{ text }] },
-    taskType,
+    content: {
+      parts: [{
+        text:
+          mode === 'query'
+            ? 'task: search result | query: ' + text
+            : 'title: none | text: ' + text,
+      }],
+    },
     outputDimensionality: dimension,
   }));
 
@@ -154,7 +160,10 @@ async function callGeminiEmbed(
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     const geminiRes = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': env.GEMINI_API_KEY,
+      },
       body: JSON.stringify({ requests }),
     });
     if (geminiRes.ok) {
@@ -203,6 +212,12 @@ export default {
       return json({ error: 'server misconfigured (GEMINI_API_KEY)' }, 500, corsOrigin);
     }
 
+    const maxBodyBytes = Number(env.MAX_BODY_BYTES || 300_000);
+    const contentLength = Number(request.headers.get('Content-Length') || 0);
+    if (contentLength > maxBodyBytes) {
+      return json({ error: 'request too large' }, 413, corsOrigin);
+    }
+
     const auth = request.headers.get('Authorization') || '';
     const token = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
     const verified = await verifyFirebaseIdToken(token, env.FIREBASE_PROJECT_ID);
@@ -217,7 +232,11 @@ export default {
 
     let body: unknown;
     try {
-      body = await request.json();
+      const bodyText = await request.text();
+      if (new TextEncoder().encode(bodyText).byteLength > maxBodyBytes) {
+        return json({ error: 'request too large' }, 413, corsOrigin);
+      }
+      body = JSON.parse(bodyText);
     } catch {
       return json({ error: 'invalid json' }, 400, corsOrigin);
     }
@@ -226,7 +245,7 @@ export default {
       return json({ error: 'invalid body' }, 400, corsOrigin);
     }
     const textsRaw = (body as { texts?: unknown }).texts;
-    const taskRaw = (body as { taskType?: unknown }).taskType;
+    const modeRaw = (body as { mode?: unknown }).mode;
     if (!Array.isArray(textsRaw) || !textsRaw.length) {
       return json({ error: 'texts required' }, 400, corsOrigin);
     }
@@ -254,16 +273,16 @@ export default {
 
     const model = env.EMBED_MODEL || DEFAULT_MODEL;
     const dimension = Number(env.EMBED_DIMENSION || DEFAULT_DIMENSION);
-    let taskType: string;
-    if (taskRaw === undefined || taskRaw === null || taskRaw === '') {
-      taskType = 'RETRIEVAL_DOCUMENT';
-    } else if (taskRaw === 'RETRIEVAL_QUERY' || taskRaw === 'RETRIEVAL_DOCUMENT') {
-      taskType = taskRaw;
+    let mode: 'query' | 'document';
+    if (modeRaw === 'query') {
+      mode = 'query';
+    } else if (modeRaw === undefined || modeRaw === null || modeRaw === '' || modeRaw === 'document') {
+      mode = 'document';
     } else {
-      return json({ error: 'invalid taskType' }, 400, corsOrigin);
+      return json({ error: 'invalid mode' }, 400, corsOrigin);
     }
 
-    const result = await callGeminiEmbed(env, model, dimension, texts, taskType);
+    const result = await callGeminiEmbed(env, model, dimension, texts, mode);
     if (!result.ok) {
       return json({ error: 'upstream embed failed', status: result.status }, 502, corsOrigin);
     }
@@ -272,7 +291,7 @@ export default {
       return json({ error: 'upstream length mismatch' }, 502, corsOrigin);
     }
     for (const row of result.embeddings) {
-      if (!row || row.length !== dimension) {
+      if (!row || row.length !== dimension || row.some(value => !Number.isFinite(value))) {
         return json({ error: 'upstream dimension mismatch' }, 502, corsOrigin);
       }
     }
@@ -281,7 +300,7 @@ export default {
       {
         embeddings: result.embeddings,
         model,
-        version: '1',
+        version: '2',
         dimension,
       },
       200,

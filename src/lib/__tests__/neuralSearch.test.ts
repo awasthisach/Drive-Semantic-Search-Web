@@ -26,7 +26,7 @@ function rec(
     corpusKey: 'user',
     contentHash: 'h' + idx,
     embeddingModel: 'gemini-embedding-2',
-    embeddingVersion: '1',
+    embeddingVersion: '2',
     dimension: 768,
     indexedAt: new Date().toISOString(),
   };
@@ -65,6 +65,13 @@ describe('rankVectorsByQueryEmbedding', () => {
     bad.embeddingModel = 'old-model';
     const hits = rankVectorsByQueryEmbedding(q, [bad], { minScore: 0.1 });
     expect(hits.length).toBe(0);
+  });
+
+  it('skips version-1 vectors after the embedding contract migration', () => {
+    const q = vec(1);
+    const old = rec('old', 0, q, 'old vector');
+    old.embeddingVersion = '1';
+    expect(rankVectorsByQueryEmbedding(q, [old], { minScore: 0.1 })).toEqual([]);
   });
 
   it('aggregates max chunk score per file', () => {
