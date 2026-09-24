@@ -3,6 +3,7 @@ import {
   getAuth,
   signInWithPopup,
   signInWithRedirect,
+  signInWithCredential,
   getRedirectResult,
   GoogleAuthProvider,
   onAuthStateChanged,
@@ -61,6 +62,21 @@ function isTokenExpired(): boolean {
   return Date.now() >= tokenExpiresAt - 60_000;
 }
 
+/**
+ * GIS token flow only yields a Drive access token; the embed Worker needs a
+ * Firebase ID token, so exchange the Google credential for a Firebase session.
+ */
+async function linkFirebaseSession(accessToken: string): Promise<User | null> {
+  if (auth.currentUser) return auth.currentUser;
+  try {
+    const result = await signInWithCredential(auth, GoogleAuthProvider.credential(null, accessToken));
+    return result.user;
+  } catch (e) {
+    console.warn('[firebaseAuth] Firebase session link skipped (neural search will be unavailable):', e);
+    return null;
+  }
+}
+
 export const requestGsiToken = async (clientId: string): Promise<{ user: Partial<User>; accessToken: string }> => {
   return new Promise((resolve, reject) => {
     if (typeof window === 'undefined') {
@@ -90,6 +106,7 @@ export const requestGsiToken = async (clientId: string): Promise<{ user: Partial
           }
           const expiresIn = Number(tokenResponse.expires_in) || 3600;
           persistToken(accessToken, expiresIn);
+          const firebaseUser = await linkFirebaseSession(accessToken);
 
           try {
             const userRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
@@ -99,9 +116,9 @@ export const requestGsiToken = async (clientId: string): Promise<{ user: Partial
               const userData = await userRes.json();
               resolve({
                 user: {
-                  displayName: userData.name || 'Google Drive User',
-                  email: userData.email || '',
-                  photoURL: userData.picture || '',
+                  displayName: userData.name || firebaseUser?.displayName || 'Google Drive User',
+                  email: userData.email || firebaseUser?.email || '',
+                  photoURL: userData.picture || firebaseUser?.photoURL || '',
                 } as any,
                 accessToken,
               });
@@ -113,9 +130,9 @@ export const requestGsiToken = async (clientId: string): Promise<{ user: Partial
 
           resolve({
             user: {
-              displayName: 'Google Drive User',
-              email: '',
-              photoURL: '',
+              displayName: firebaseUser?.displayName || 'Google Drive User',
+              email: firebaseUser?.email || '',
+              photoURL: firebaseUser?.photoURL || '',
             } as any,
             accessToken,
           });
@@ -149,10 +166,11 @@ export const initAuth = (
 
   return onAuthStateChanged(auth, async (user: User | null) => {
     if (user) {
+      if (isSigningIn) return; // interactive sign-in flow owns state updates
       if (cachedAccessToken) {
         if (onAuthSuccess) onAuthSuccess(user, cachedAccessToken);
-      } else if (!isSigningIn) {
-        if (onAuthFailure) onAuthFailure();
+      } else if (onAuthFailure) {
+        onAuthFailure();
       }
     } else {
       persistToken(null);
