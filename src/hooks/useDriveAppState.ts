@@ -17,6 +17,7 @@ export function useDriveAppState() {
   const [files, setFiles] = useState<DriveFile[]>(INITIAL_FILES);
   const [folders, setFolders] = useState<FolderItem[]>(INITIAL_FOLDERS);
   const [vaultFiles, setVaultFiles] = useState<VaultFile[]>([]);
+  const [vaultLoaded, setVaultLoaded] = useState(false);
   const [isGoogleConnected, setIsGoogleConnected] = useState(false);
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const [googleAccessToken, setGoogleAccessToken] = useState<string | null>(null);
@@ -57,6 +58,8 @@ export function useDriveAppState() {
         if (!cancelled && stored.length) setVaultFiles(stored);
       } catch (e) {
         console.warn('Vault restore skipped:', e);
+      } finally {
+        if (!cancelled) setVaultLoaded(true);
       }
     })();
     return () => { cancelled = true; };
@@ -163,7 +166,7 @@ export function useDriveAppState() {
   }, []);
 
   return {
-    files, setFiles, folders, setFolders, vaultFiles, setVaultFiles,
+    files, setFiles, folders, setFolders, vaultFiles, setVaultFiles, vaultLoaded,
     isGoogleConnected, setIsGoogleConnected, isGoogleLoading, setIsGoogleLoading,
     googleAccessToken, setGoogleAccessToken,
     driveFileTypeFilter, setDriveFileTypeFilter, driveCorpus, setDriveCorpus,

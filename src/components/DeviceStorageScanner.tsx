@@ -171,12 +171,12 @@ export const DeviceStorageScanner: React.FC<DeviceStorageScannerProps> = ({
         onChange={e => handleDirectoryPicked(e, 'sd_card')} />
 
       <div className="rounded-2xl bg-zinc-900 text-white p-5 space-y-3">
-        <h2 className="text-lg font-bold">Device Storage Scanner (demo)</h2>
-        <p className="text-xs text-zinc-400">Mock + folder picker metadata. Does not wipe phone storage or upload bytes to Drive.</p>
+        <h2 className="text-lg font-bold">Device File Picker</h2>
+        <p className="text-xs text-zinc-400">Browser-safe file metadata only. This page cannot scan the entire Android filesystem or delete device files.</p>
         <div className="flex flex-wrap gap-2">
           <button type="button" disabled={isScanning} onClick={handleTriggerScan}
             className="px-3 py-2 rounded-xl bg-blue-600 text-xs font-bold disabled:opacity-50">
-            {isScanning ? `Scanning ${scanProgress}%` : 'Deep Scan (demo)'}
+            {isScanning ? `Processing ${scanProgress}%` : 'Demo Scan'}
           </button>
           <button type="button" onClick={() => phoneFolderInputRef.current?.click()}
             className="px-3 py-2 rounded-xl bg-zinc-800 border border-zinc-700 text-xs font-semibold">Pick Phone Folder</button>
@@ -221,7 +221,7 @@ export const DeviceStorageScanner: React.FC<DeviceStorageScannerProps> = ({
       </div>
 
       {filteredFiles.length === 0 && (
-        <p className="text-center text-sm text-zinc-500 py-8">No device files in list. Run demo scan or pick a folder.</p>
+        <p className="text-center text-sm text-zinc-500 py-8">No device files in list. Pick a folder or run the demo scan.</p>
       )}
     </div>
   );

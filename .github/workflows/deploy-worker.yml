@@ -42,7 +42,7 @@ jobs:
           test -n "$CLOUDFLARE_API_TOKEN"
           test -n "$CLOUDFLARE_ACCOUNT_ID"
           npm run deploy
-      - name: Verify authenticated live embed contract
+      - name: Verify live Worker configuration and auth gate
         working-directory: .
         env:
           EMBED_ENDPOINT: ${{ secrets.VITE_EMBED_ENDPOINT || 'https://drive-semantic-embed.awasthi-sach.workers.dev' }}
