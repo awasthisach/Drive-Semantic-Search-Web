@@ -134,7 +134,11 @@ export default function App() {
           <React.Suspense fallback={<TabLoadingFallback />}>
             <DuplicateFinder
               files={files}
+              folders={folders}
+              corpusKey={makeCorpusKey(driveCorpus, sharedDriveId || undefined)}
               onRemoveFiles={handleRemoveMultipleFiles}
+              onMoveFiles={handleMoveFilesToFolder}
+              onCreateFolder={handleCreateFolder}
               onVerifyHashes={handleVerifyHashes}
               verifyBusy={verifyBusy}
             />

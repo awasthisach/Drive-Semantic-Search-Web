@@ -25,7 +25,8 @@ Client-side Progressive Web App for Google Drive with **hybrid semantic search**
 - **Select all visible** — pagination-aware (current page only)
 - **Offline pin** — IndexedDB LRU + SHA-256; browser storage quota on Offline tab
 - **Vault** — PBKDF2 310k + AES-GCM (Worker + main-thread fallback)
-- **Duplicates** — size+name candidates; trash locked until SHA-256 verify; durable hash snapshot
+- **Duplicates** — select duplicate/candidate files individually or in bulk; move selected files to Drive root or any folder; trash remains locked until SHA-256 verify; durable hash snapshot
+- **Semantic duplicate review** — after content embedding, compare file-level embedding centroids with a user-selected similarity threshold (85/90/95%); semantic matches are review-only and can be selected for move, never auto-trashed
 - **Local diagnostics** — privacy-preserving ring buffer with ANN candidate/fallback/latency metrics; header **Diagnostics** export (tokens and emails redacted)
 - **PWA** — Vite PWA shell, installable
 
@@ -56,6 +57,8 @@ React 19 · Vite 6 · Tailwind 4 · TypeScript strict · Firebase Auth + GIS · 
 5. Sign in to the live app and run **Index extractable content** before testing neural search.
 6. Test both a semantic query and a normal filename/keyword query.
 7. Verify that an embedding failure still returns BM25 + metadata results.
+8. Open **Duplicates**, select one or more files, choose **Move selected**, and confirm a Drive folder.
+9. For semantic duplicate review, index extractable content first, then choose a similarity threshold and select **Find similar files**. Review the groups before moving anything.
 
 **Security rule:** every `VITE_*` value is public because it is bundled into the browser. Never put `GEMINI_API_KEY`, Cloudflare API tokens, Firebase private keys, service-account credentials, or OAuth client secrets in frontend environment variables or committed files.
 
@@ -170,6 +173,7 @@ Google Drive OAuth uses the public client configuration in `firebase-applet-conf
 - Large-corpus vector search uses a versioned IndexedDB multi-probe LSH index and exact cosine re-ranking of candidates; first use backfills the derived index with a streaming cursor. If the ANN candidate set is empty or produces no qualified hit, an exact corpus scan is used as a correctness fallback.
 - ANN relevance is regression-tested on a deterministic, labeled fixture, not on real user Drive data; do not interpret the fixture as proof of production semantic quality or use it to tune hybrid weights
 - No full PDF/DOCX/OCR pipeline in browser yet (text extraction where Drive/export supports it)
+- Semantic duplicate groups use the centroid of indexed chunk embeddings. They are similarity candidates, not proof of byte-identical files; exact duplicate trash requires SHA-256 verification.
 - Filtered type syncs use full list; incremental only for type = **all**
 - Broad `drive` OAuth scope; access token in `sessionStorage` (see [SECURITY.md](SECURITY.md))
 - List pagination capped (~20k) with truncation banner
