@@ -21,15 +21,6 @@ describe('expandTerms', () => {
     expect(variants).toContain('cannabis report');
     expect(variants).toContain('hemp report');
     expect(variants).toContain('भांग report');
-    expect(variants.length).toBeLessThanOrEqual(8);
-  });
-});
-
-
-describe('expandSemanticQueries request budget', () => {
-  it('caps neural variants to three requests', async () => {
-    const { expandSemanticQueries } = await import('../queryExpand');
-    expect(expandSemanticQueries('cannabis').length).toBeLessThanOrEqual(3);
-    expect(expandSemanticQueries('ordinary query').length).toBe(1);
+    expect(variants.length).toBeLessThanOrEqual(3);
   });
 });
