@@ -21,7 +21,7 @@ Client-side Progressive Web App for Google Drive with **hybrid semantic search**
   - **Neural (optional)** — Gemini Embedding 2 (768 dimensions, compatibility version 3) via authenticated Worker → cosine over chunk vectors → hybrid blend
   - Highlight chips, match reasons, Star / Pin offline / Copy link on results
   - Hindi/Hinglish query expansion (lightweight pairs; preserves Devanagari combining marks)
-- **Content + vector index** — IndexedDB BM25 docs/chunks/postings **and** separate vector store; content-hash skip re-embed; cancel + progress; **resume cursor** (SHA-256 signature of corpus file list)
+- **Content + vector index** — IndexedDB BM25 docs/chunks/postings **and** separate vector store; versioned multi-probe LSH bucket index for large-corpus candidate retrieval; content-hash skip re-embed; cancel + progress; **resume cursor** (SHA-256 signature of corpus file list)
 - **Select all visible** — pagination-aware (current page only)
 - **Offline pin** — IndexedDB LRU + SHA-256; browser storage quota on Offline tab
 - **Vault** — PBKDF2 310k + AES-GCM (Worker + main-thread fallback)
@@ -69,6 +69,7 @@ npm ci
 npm run dev      # localhost:3000
 npm run lint     # tsc --noEmit
 npm test
+npm run evaluate:relevance  # deterministic ANN retrieval/relevance regression fixture
 npm run build
 npm run check:bundle
 ```
@@ -107,7 +108,7 @@ Incremental extract / index
 |--------|-------------|
 | Metadata | Always |
 | BM25 body | After “Index extractable content” |
-| Neural cosine | Worker reachable **and** vectors stored during index |
+| Neural cosine | Worker reachable **and** vectors stored during index; exact scan for ≤128 vectors, IndexedDB LSH candidates above that |
 
 **Provisional hybrid weights** (code: `HYBRID_WEIGHTS` in `src/lib/searchEngine.ts`):
 
@@ -166,7 +167,8 @@ Google Drive OAuth uses the public client configuration in `firebase-applet-conf
 ## Honest limits
 
 - Hybrid weights are **provisional** until eval on real Gemini embeddings
-- Vector search loads corpus vectors from IndexedDB (`getAll`) — fine for small/medium corpora; large Drive may need later indexing/ANN work
+- Large-corpus vector search uses a versioned IndexedDB multi-probe LSH index and exact cosine re-ranking of candidates; first use backfills the derived index with a streaming cursor
+- ANN relevance is regression-tested on a deterministic, labeled fixture, not on real user Drive data; do not interpret the fixture as proof of production semantic quality or use it to tune hybrid weights
 - No full PDF/DOCX/OCR pipeline in browser yet (text extraction where Drive/export supports it)
 - Filtered type syncs use full list; incremental only for type = **all**
 - Broad `drive` OAuth scope; access token in `sessionStorage` (see [SECURITY.md](SECURITY.md))
