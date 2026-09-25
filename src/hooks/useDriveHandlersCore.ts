@@ -29,7 +29,7 @@ import { INITIAL_FILES, INITIAL_FOLDERS } from '../lib/driveApi';
 export function useDriveHandlersCore(s: DriveAppState) {
   const {
     files, setFiles, folders, setFolders, vaultFiles, setVaultFiles,
-    isGoogleConnected, setIsGoogleConnected, isGoogleLoading, setIsGoogleLoading,
+    isGoogleConnected, setIsGoogleConnected, setIsDemoMode, isGoogleLoading, setIsGoogleLoading,
     googleAccessToken, setGoogleAccessToken,
     driveFileTypeFilter, setDriveFileTypeFilter, driveCorpus, setDriveCorpus,
     sharedDriveId, setSharedDriveId, sharedDrives, setSharedDrives,
@@ -67,6 +67,7 @@ export function useDriveHandlersCore(s: DriveAppState) {
   };
 
   const handleConnectDemoDrive = () => {
+    setIsDemoMode(true);
     setIsGoogleConnected(true);
     setUserProfile(p => ({ ...p, name: 'Demo Drive', isConnected: true }));
     setFiles(INITIAL_FILES);
@@ -79,6 +80,7 @@ export function useDriveHandlersCore(s: DriveAppState) {
       setIsGoogleLoading(true);
       const result = await googleSignIn();
       if (result) {
+        setIsDemoMode(false);
         setGoogleAccessToken(result.accessToken);
         setIsGoogleConnected(true);
         try {
@@ -135,6 +137,7 @@ export function useDriveHandlersCore(s: DriveAppState) {
   const handleGoogleSignOut = async () => {
     try {
       await googleSignOut({ revoke: true });
+      setIsDemoMode(false);
       setIsGoogleConnected(false);
       setGoogleAccessToken(null);
       setDriveTruncated(false);

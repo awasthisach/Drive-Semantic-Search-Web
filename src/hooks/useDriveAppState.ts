@@ -18,6 +18,7 @@ export function useDriveAppState() {
   const [folders, setFolders] = useState<FolderItem[]>(INITIAL_FOLDERS);
   const [vaultFiles, setVaultFiles] = useState<VaultFile[]>([]);
   const [isGoogleConnected, setIsGoogleConnected] = useState(false);
+  const [isDemoMode, setIsDemoMode] = useState(false);
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const [googleAccessToken, setGoogleAccessToken] = useState<string | null>(null);
   const [driveFileTypeFilter, setDriveFileTypeFilter] = useState<DriveFileTypeFilter>('all');
@@ -109,6 +110,7 @@ export function useDriveAppState() {
   useEffect(() => {
     const unsubscribe = initAuth(
       async (user, token) => {
+        setIsDemoMode(false);
         setIsGoogleConnected(true);
         setGoogleAccessToken(token);
         setUserProfile({
@@ -155,6 +157,7 @@ export function useDriveAppState() {
         }
       },
       () => {
+        setIsDemoMode(false);
         setIsGoogleConnected(false);
         setGoogleAccessToken(null);
         setSharedDrives([]);
@@ -166,7 +169,7 @@ export function useDriveAppState() {
 
   return {
     files, setFiles, folders, setFolders, vaultFiles, setVaultFiles,
-    isGoogleConnected, setIsGoogleConnected, isGoogleLoading, setIsGoogleLoading,
+    isGoogleConnected, setIsGoogleConnected, isDemoMode, setIsDemoMode, isGoogleLoading, setIsGoogleLoading,
     googleAccessToken, setGoogleAccessToken,
     driveFileTypeFilter, setDriveFileTypeFilter, driveCorpus, setDriveCorpus,
     sharedDriveId, setSharedDriveId, sharedDrives, setSharedDrives,

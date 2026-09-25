@@ -57,6 +57,7 @@ export const AuthErrorModal: React.FC<AuthErrorModalProps> = ({
           <button
             type="button"
             onClick={onClose}
+            aria-label="Close authentication status"
             className="p-2 rounded-xl text-zinc-400 hover:text-white hover:bg-zinc-800 transition cursor-pointer"
           >
             <X className="w-5 h-5" />

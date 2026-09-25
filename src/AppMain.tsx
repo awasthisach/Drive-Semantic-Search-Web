@@ -38,7 +38,7 @@ const TabLoadingFallback = () => (
 export default function App() {
   const {
     files, folders, vaultFiles,
-    isGoogleConnected, isGoogleLoading, googleAccessToken,
+    isGoogleConnected, isDemoMode, isGoogleLoading, googleAccessToken,
     driveFileTypeFilter, setDriveFileTypeFilter, driveCorpus, setDriveCorpus,
     sharedDriveId, setSharedDriveId, sharedDrives,
     driveTruncated, driveNotification, setDriveNotification,
@@ -93,21 +93,22 @@ export default function App() {
         {activeTab === 'dashboard' && (
           <Dashboard
             files={files} folders={folders} vaultFiles={vaultFiles}
-            onUploadFile={handleUploadFile} onUploadToDrive={handleUploadToDrive} onDeleteFile={handleDeleteFile}
+            onUploadFile={handleUploadFile} onUploadToDrive={isDemoMode ? undefined : handleUploadToDrive} onDeleteFile={handleDeleteFile}
             onDeleteMultipleFiles={handleRemoveMultipleFiles} onMoveFilesToFolder={handleMoveFilesToFolder}
             onCreateFolder={handleCreateFolder} onToggleStar={handleToggleStar} onToggleOffline={handleToggleOffline}
             onSelectTab={tab => setActiveTab(tab)} onSelectPreviewFile={setPreviewFile}
             isGoogleConnected={isGoogleConnected} isGoogleLoading={isGoogleLoading}
+            isDemoMode={isDemoMode}
             googleUserEmail={userProfile.email}
             onConnectGoogleDrive={handleGoogleSignIn} onConnectDemoDrive={handleConnectDemoDrive}
-            onSyncGoogleDrive={handleSyncGoogleDrive}
+            onSyncGoogleDrive={isDemoMode ? undefined : handleSyncGoogleDrive}
             driveFileTypeFilter={driveFileTypeFilter}
-            onDriveFileTypeChange={t => { setDriveFileTypeFilter(t); handleSyncGoogleDrive(t); }}
+            onDriveFileTypeChange={isDemoMode ? undefined : t => { setDriveFileTypeFilter(t); handleSyncGoogleDrive(t); }}
             driveTruncated={driveTruncated}
             driveCorpus={driveCorpus}
             sharedDriveId={sharedDriveId}
             sharedDrives={sharedDrives}
-            onDriveCorpusChange={(c, id) => {
+            onDriveCorpusChange={isDemoMode ? undefined : (c, id) => {
               setDriveCorpus(c);
               setSharedDriveId(id || '');
               try {

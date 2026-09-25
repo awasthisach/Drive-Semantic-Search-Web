@@ -27,6 +27,7 @@ interface DashboardProps {
   onSelectTab: (tab: AppTab) => void;
   onSelectPreviewFile: (file: DriveFile) => void;
   isGoogleConnected?: boolean;
+  isDemoMode?: boolean;
   isGoogleLoading?: boolean;
   googleUserEmail?: string;
   onConnectGoogleDrive?: () => void;
@@ -44,7 +45,7 @@ interface DashboardProps {
 export const Dashboard: React.FC<DashboardProps> = ({
   files, folders, vaultFiles, onUploadFile, onUploadToDrive, onDeleteFile, onDeleteMultipleFiles,
   onMoveFilesToFolder, onCreateFolder, onToggleStar, onToggleOffline, onSelectTab,
-  onSelectPreviewFile, isGoogleConnected = false, isGoogleLoading = false,
+  onSelectPreviewFile, isGoogleConnected = false, isDemoMode = false, isGoogleLoading = false,
   googleUserEmail = '', onConnectGoogleDrive, onConnectDemoDrive, onSyncGoogleDrive,
   driveFileTypeFilter = 'all', onDriveFileTypeChange, driveTruncated = false,
   driveCorpus = 'user', sharedDriveId = '', sharedDrives = [], onDriveCorpusChange,
@@ -158,11 +159,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
             <div className="p-2.5 rounded-xl bg-blue-600 text-white"><Cloud className="w-5 h-5" /></div>
             <div>
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-sm font-bold">Google Drive Live Sync</span>
-                <span className="text-[10px] font-semibold text-emerald-600 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">Connected</span>
+                <span className="text-sm font-bold">{isDemoMode ? 'Demo Drive' : 'Google Drive Live Sync'}</span>
+                <span className="text-[10px] font-semibold text-emerald-600 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">{isDemoMode ? 'Local demo' : 'Connected'}</span>
               </div>
               <p className="text-[11px] text-zinc-600 dark:text-zinc-400 mt-0.5">
-                {googleUserEmail || 'Signed in'} • {files.filter(f => f.isGoogleDriveItem).length} Drive files
+                {isDemoMode ? 'Sample data only — no Drive access' : `${googleUserEmail || 'Signed in'} • ${files.filter(f => f.isGoogleDriveItem).length} Drive files`}
               </p>
               {driveTruncated && (
                 <p className="text-[10px] text-amber-700 dark:text-amber-400 mt-1 font-medium">
@@ -252,7 +253,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
         </select>
         <label className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-blue-600 text-white text-xs font-bold cursor-pointer">
           <UploadCloud className="w-3.5 h-3.5" />
-          {isGoogleConnected ? 'Upload to Drive' : 'Upload'}
+          {isGoogleConnected && !isDemoMode ? 'Upload to Drive' : 'Upload'}
           <input type="file" className="hidden" onChange={handleFileUpload} />
         </label>
       </div>
@@ -318,7 +319,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
           <div key={file.id} className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3 hover:border-blue-400 transition cursor-pointer"
             onClick={() => onSelectPreviewFile(file)}>
             <div className="flex items-start gap-2">
-              <button type="button" onClick={e => { e.stopPropagation(); toggleSelect(file.id); }} className="mt-0.5">
+              <button type="button" aria-label={selectedFileIds.has(file.id) ? `Deselect ${file.name}` : `Select ${file.name}`} onClick={e => { e.stopPropagation(); toggleSelect(file.id); }} className="mt-0.5">
                 {selectedFileIds.has(file.id) ? <CheckSquare className="w-4 h-4 text-blue-600" /> : <Square className="w-4 h-4 text-zinc-400" />}
               </button>
               <div className="min-w-0 flex-1">
@@ -328,10 +329,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
               </div>
               <div className="flex flex-col items-end gap-1 shrink-0">
                 <div className="flex items-center gap-1.5">
-                  <button type="button" onClick={e => { e.stopPropagation(); onToggleStar(file.id); }} title="Star">
+                  <button type="button" onClick={e => { e.stopPropagation(); onToggleStar(file.id); }} title={file.starred ? 'Unstar' : 'Star'} aria-label={file.starred ? `Unstar ${file.name}` : `Star ${file.name}`}>
                     <Star className={`w-4 h-4 ${file.starred ? 'text-amber-500 fill-amber-500' : 'text-zinc-400'}`} />
                   </button>
-                  <button type="button" onClick={e => { e.stopPropagation(); onToggleOffline(file.id); }} title={file.isOffline ? 'Unpin offline' : 'Pin offline'}>
+                  <button type="button" onClick={e => { e.stopPropagation(); onToggleOffline(file.id); }} title={file.isOffline ? 'Unpin offline' : 'Pin offline'} aria-label={file.isOffline ? `Unpin ${file.name} offline` : `Pin ${file.name} offline`}>
                     <Pin className={`w-4 h-4 ${file.isOffline ? 'text-emerald-500' : 'text-zinc-400'}`} />
                   </button>
                 </div>

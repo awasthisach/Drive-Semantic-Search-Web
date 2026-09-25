@@ -83,7 +83,7 @@ export const FilePreviewModal: React.FC<FilePreviewModalProps> = ({
             <FileText className="w-5 h-5 text-blue-600 shrink-0" />
             <span className="font-bold text-sm truncate">{file.name}</span>
           </div>
-          <button type="button" onClick={onClose} className="p-1 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800">
+          <button type="button" onClick={onClose} aria-label="Close file preview" className="p-1 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800">
             <X className="w-5 h-5" />
           </button>
         </div>
