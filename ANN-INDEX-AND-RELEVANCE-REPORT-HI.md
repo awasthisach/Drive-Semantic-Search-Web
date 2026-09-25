@@ -10,6 +10,8 @@
 - 128 या कम vectors के corpus पर existing exact search रखा है—छोटे corpus में ANN index overhead नहीं जोड़ा जाता।
 - पहले ANN query पर पुराने v1 records का index corpus-scoped, streaming IndexedDB cursor से backfill होता है। Migration metadata में algorithm version है; index बदले तो derived buckets फिर बनेंगे।
 - बड़े corpus में यदि ANN candidate set खाली हो या सभी candidates `minScore` के कारण reject हो जाएँ, तो `searchNeuralByEmbedding` स्वतः पूरे corpus पर exact cosine scan करता है। इससे partial/empty ANN index के कारण silent empty result नहीं आता। `onMetrics` में `usedExactFallback` और `fallbackReason` (`empty-candidates` या `no-qualified-hits`) मिलते हैं।
+- बड़े corpus का derived index अब browser idle समय में warm-up हो सकता है। Web Locks API उपलब्ध होने पर अलग-अलग tabs एक ही corpus migration को serialize करते हैं; unsupported browsers में पुराना transaction fallback चलता रहता है।
+- Search metrics केवल local diagnostics ring में रखे जाते हैं: corpus/vector counts, candidate counts, fallback reason और latency। Query text, file body, embedding vector और token log नहीं किए जाते।
 - नए vectors embedding/write transaction में bucket keys समेत सहेजे जाते हैं। API embedding failure पर पहले की तरह valid vectors नहीं हटते।
 
 ## Reproducible benchmark

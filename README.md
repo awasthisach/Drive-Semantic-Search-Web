@@ -21,12 +21,12 @@ Client-side Progressive Web App for Google Drive with **hybrid semantic search**
   - **Neural (optional)** — Gemini Embedding 2 (768 dimensions, compatibility version 3) via authenticated Worker → cosine over chunk vectors → hybrid blend
   - Highlight chips, match reasons, Star / Pin offline / Copy link on results
   - Hindi/Hinglish query expansion (lightweight pairs; preserves Devanagari combining marks)
-- **Content + vector index** — IndexedDB BM25 docs/chunks/postings **and** separate vector store; versioned multi-probe LSH bucket index for large-corpus candidate retrieval; content-hash skip re-embed; cancel + progress; **resume cursor** (SHA-256 signature of corpus file list)
+- **Content + vector index** — IndexedDB BM25 docs/chunks/postings **and** separate vector store; versioned multi-probe LSH bucket index for large-corpus candidate retrieval; content-hash skip re-embed; cancel + progress; **resume cursor** (SHA-256 signature of corpus file list); idle ANN warm-up with Web Locks coordination across tabs
 - **Select all visible** — pagination-aware (current page only)
 - **Offline pin** — IndexedDB LRU + SHA-256; browser storage quota on Offline tab
 - **Vault** — PBKDF2 310k + AES-GCM (Worker + main-thread fallback)
 - **Duplicates** — size+name candidates; trash locked until SHA-256 verify; durable hash snapshot
-- **Local diagnostics** — ring buffer; header **Diagnostics** export (tokens redacted)
+- **Local diagnostics** — privacy-preserving ring buffer with ANN candidate/fallback/latency metrics; header **Diagnostics** export (tokens and emails redacted)
 - **PWA** — Vite PWA shell, installable
 
 ---
@@ -120,7 +120,7 @@ Incremental extract / index
 
 These are **not** eval-validated on a representative real Drive/Gemini corpus. Treat them as provisional until live ranking evaluation is performed.
 
-If the embed pipeline fails or is not configured, search **falls back** to BM25 + metadata (does not hard-fail).
+If the embed pipeline fails or is not configured, search **falls back** to BM25 + metadata (does not hard-fail). If a stale PWA deployment references a removed lazy chunk, the app performs at most one guarded reload per minute to recover the current asset manifest.
 
 ---
 
