@@ -1,16 +1,21 @@
 /**
- * Phase 3b — IndexedDB vector store (independent of BM25 postings).
- * Phase 4 — cosine ranking helpers.
- * Same contentHash + model + version + dimension → skip re-embed.
- * API failure must not delete existing valid vectors.
+ * IndexedDB vector store with versioned sparse random-hyperplane LSH buckets.
+ * Vectors remain the source of truth; ANN buckets are a rebuildable acceleration index.
  */
 import type { EmbeddingProvider } from './embeddings/types';
 import { EMBED_CONFIG } from './embeddings/config';
 import { cosineSimilarity } from './embeddings/vector';
 
 const DB_NAME = 'drive-vector-index';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const VECTOR_STORE = 'vectors';
+const ANN_META_STORE = 'annMetadata';
+const ANN_INDEX_VERSION = 'sparse-rp-lsh-v2-scoped';
+const ANN_TABLES = 12;
+const ANN_BITS_PER_TABLE = 12;
+const ANN_DIMS_PER_PLANE = 8;
+const DEFAULT_EXACT_SEARCH_THRESHOLD = 128;
+const ANN_META_ID_PREFIX = 'ann-index:';
 
 export interface VectorRecord {
   id: string;
@@ -23,9 +28,30 @@ export interface VectorRecord {
   embeddingModel: string;
   embeddingVersion: string;
   dimension: number;
+  /** Multi-entry IndexedDB index entries; derived and safe to rebuild. */
+  annBuckets?: string[];
   driveModifiedTime?: string;
   indexedAt: string;
 }
+
+interface AnnMetadataRecord {
+  id: string;
+  version: string;
+  indexedAt: string;
+}
+
+interface ProjectionPlane {
+  indices: Uint16Array;
+  signs: Int8Array;
+}
+
+interface AnnProbe {
+  bucket: string;
+  margin: number;
+}
+
+const projectionCache = new Map<number, ProjectionPlane[][]>();
+const annIndexPromises = new Map<string, Promise<void>>();
 
 function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -38,14 +64,154 @@ function openDb(): Promise<IDBDatabase> {
     req.onsuccess = () => resolve(req.result);
     req.onupgradeneeded = () => {
       const db = req.result;
+      let store: IDBObjectStore;
       if (!db.objectStoreNames.contains(VECTOR_STORE)) {
-        const store = db.createObjectStore(VECTOR_STORE, { keyPath: 'id' });
+        store = db.createObjectStore(VECTOR_STORE, { keyPath: 'id' });
         store.createIndex('fileId', 'fileId', { unique: false });
         store.createIndex('corpusKey', 'corpusKey', { unique: false });
         store.createIndex('contentHash', 'contentHash', { unique: false });
+      } else {
+        store = req.transaction!.objectStore(VECTOR_STORE);
+      }
+      if (!store.indexNames.contains('annBuckets')) {
+        store.createIndex('annBuckets', 'annBuckets', { unique: false, multiEntry: true });
+      }
+      if (!db.objectStoreNames.contains(ANN_META_STORE)) {
+        db.createObjectStore(ANN_META_STORE, { keyPath: 'id' });
       }
     };
   });
+}
+
+/** Stable PRNG so every browser derives identical projection planes. */
+function mulberry32(seed: number): () => number {
+  let state = seed >>> 0;
+  return () => {
+    state += 0x6d2b79f5;
+    let value = state;
+    value = Math.imul(value ^ (value >>> 15), value | 1);
+    value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
+    return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function getProjectionPlanes(dimension: number): ProjectionPlane[][] {
+  const cached = projectionCache.get(dimension);
+  if (cached) return cached;
+  const planes: ProjectionPlane[][] = [];
+  for (let table = 0; table < ANN_TABLES; table++) {
+    const tablePlanes: ProjectionPlane[] = [];
+    for (let bit = 0; bit < ANN_BITS_PER_TABLE; bit++) {
+      const random = mulberry32(
+        0x51f15e + dimension * 97 + table * 7919 + bit * 104729
+      );
+      const indices = new Uint16Array(ANN_DIMS_PER_PLANE);
+      const signs = new Int8Array(ANN_DIMS_PER_PLANE);
+      for (let i = 0; i < ANN_DIMS_PER_PLANE; i++) {
+        indices[i] = Math.floor(random() * dimension);
+        signs[i] = random() < 0.5 ? -1 : 1;
+      }
+      tablePlanes.push({ indices, signs });
+    }
+    planes.push(tablePlanes);
+  }
+  projectionCache.set(dimension, planes);
+  return planes;
+}
+
+function getAnnProbes(vector: ArrayLike<number>): AnnProbe[][] {
+  if (vector.length !== EMBED_CONFIG.dimension) return [];
+  for (let i = 0; i < vector.length; i++) {
+    if (!Number.isFinite(vector[i])) return [];
+  }
+  const planes = getProjectionPlanes(vector.length);
+  return planes.map((tablePlanes, tableIdx) => {
+    let bits = 0;
+    const margins: number[] = [];
+    for (let bit = 0; bit < tablePlanes.length; bit++) {
+      const plane = tablePlanes[bit];
+      let projection = 0;
+      for (let i = 0; i < plane.indices.length; i++) {
+        projection += vector[plane.indices[i]] * plane.signs[i];
+      }
+      if (projection >= 0) bits |= 1 << bit;
+      margins.push(Math.abs(projection));
+    }
+    const nearestBit = margins.reduce(
+      (best, margin, bit) => (margin < margins[best] ? bit : best),
+      0
+    );
+    const prefix = `${ANN_INDEX_VERSION}:${tableIdx}:`;
+    const mask = 1 << nearestBit;
+    return [
+      { bucket: `${prefix}${bits}`, margin: 0 },
+      { bucket: `${prefix}${bits ^ mask}`, margin: margins[nearestBit] },
+    ];
+  });
+}
+
+function annBucketKeys(vector: ArrayLike<number>, corpusKey: string): string[] {
+  const scope = encodeURIComponent(corpusKey);
+  return getAnnProbes(vector).flatMap((table, tableIdx) =>
+    table.map(probe => `${ANN_INDEX_VERSION}:${scope}:${tableIdx}:${probe.bucket.split(':').at(-1)}`)
+  );
+}
+
+/** Exported for deterministic tests and the offline relevance evaluator. */
+export function getAnnProbeBucketKeys(queryEmbedding: number[], corpusKey = ''): string[] {
+  return annBucketKeys(queryEmbedding, corpusKey);
+}
+
+/**
+ * One-time, streaming backfill for existing v1 records. This uses an IndexedDB
+ * cursor and stores only derived bucket keys, never loading the corpus at once.
+ */
+async function ensureAnnIndex(corpusKey: string): Promise<void> {
+  if (annIndexPromises.has(corpusKey)) return annIndexPromises.get(corpusKey)!;
+  const indexing = (async () => {
+    const db = await openDb();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction([VECTOR_STORE, ANN_META_STORE], 'readwrite');
+      const vectors = tx.objectStore(VECTOR_STORE);
+      const metadata = tx.objectStore(ANN_META_STORE);
+      const metaId = ANN_META_ID_PREFIX + corpusKey;
+      let migrationError: unknown;
+      const metaReq = metadata.get(metaId);
+      metaReq.onsuccess = () => {
+        const saved = metaReq.result as AnnMetadataRecord | undefined;
+        if (saved?.version === ANN_INDEX_VERSION) return;
+        const cursorReq = vectors.index('corpusKey').openCursor(IDBKeyRange.only(corpusKey));
+        cursorReq.onerror = () => {
+          migrationError = cursorReq.error || new Error('ANN index cursor failed');
+          try { tx.abort(); } catch { /* transaction already ended */ }
+        };
+        cursorReq.onsuccess = () => {
+          const cursor = cursorReq.result;
+          if (!cursor) {
+            metadata.put({ id: metaId, version: ANN_INDEX_VERSION, indexedAt: new Date().toISOString() });
+            return;
+          }
+          const record = cursor.value as VectorRecord;
+          cursor.update({ ...record, annBuckets: annBucketKeys(record.embedding, corpusKey) });
+          cursor.continue();
+        };
+      };
+      metaReq.onerror = () => {
+        migrationError = metaReq.error || new Error('ANN metadata lookup failed');
+        try { tx.abort(); } catch { /* transaction already ended */ }
+      };
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(migrationError || tx.error || new Error('ANN index migration failed'));
+      tx.onabort = () => reject(migrationError || tx.error || new Error('ANN index migration aborted'));
+    });
+  })();
+  annIndexPromises.set(corpusKey, indexing);
+  try {
+    await indexing;
+  } catch (error) {
+    annIndexPromises.delete(corpusKey);
+    throw error;
+  }
 }
 
 export async function hashContent(text: string): Promise<string> {
@@ -120,20 +286,50 @@ export async function getVectorsForFile(fileId: string, corpusKey?: string): Pro
 export async function listVectors(corpusKey?: string): Promise<VectorRecord[]> {
   try {
     const db = await openDb();
-    const all: VectorRecord[] = await new Promise((resolve, reject) => {
-      const req = db.transaction(VECTOR_STORE, 'readonly').objectStore(VECTOR_STORE).getAll();
+    return new Promise((resolve, reject) => {
+      const store = db.transaction(VECTOR_STORE, 'readonly').objectStore(VECTOR_STORE);
+      const req = corpusKey ? store.index('corpusKey').getAll(corpusKey) : store.getAll();
       req.onsuccess = () => resolve((req.result || []) as VectorRecord[]);
       req.onerror = () => reject(req.error);
     });
-    if (!corpusKey) return all;
-    return all.filter(v => v.corpusKey === corpusKey);
   } catch {
     return [];
   }
 }
 
 export async function countVectors(corpusKey?: string): Promise<number> {
-  return (await listVectors(corpusKey)).length;
+  try {
+    const db = await openDb();
+    return await new Promise((resolve, reject) => {
+      const store = db.transaction(VECTOR_STORE, 'readonly').objectStore(VECTOR_STORE);
+      const req = corpusKey ? store.index('corpusKey').count(corpusKey) : store.count();
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  } catch {
+    return 0;
+  }
+}
+
+async function getVectorsForAnnBuckets(bucketKeys: string[]): Promise<VectorRecord[]> {
+  if (!bucketKeys.length) return [];
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(VECTOR_STORE, 'readonly');
+    const index = tx.objectStore(VECTOR_STORE).index('annBuckets');
+    const records = new Map<string, VectorRecord>();
+    let requestError: unknown;
+    for (const key of bucketKeys) {
+      const req = index.getAll(IDBKeyRange.only(key));
+      req.onsuccess = () => {
+        for (const record of (req.result || []) as VectorRecord[]) records.set(record.id, record);
+      };
+      req.onerror = () => { requestError = req.error || new Error('ANN bucket lookup failed'); };
+    }
+    tx.oncomplete = () => resolve([...records.values()]);
+    tx.onerror = () => reject(requestError || tx.error || new Error('ANN bucket lookup failed'));
+    tx.onabort = () => reject(requestError || tx.error || new Error('ANN bucket lookup aborted'));
+  });
 }
 
 export async function removeVectorsForFile(
@@ -175,7 +371,6 @@ export async function embedAndStoreChunks(opts: {
 
   const existing = await getVectorsForFile(fileId, corpusKey);
   const byIdx = new Map(existing.map(v => [v.idx, v]));
-
   const toEmbed: { idx: number; text: string; contentHash: string }[] = [];
   let skipped = 0;
 
@@ -191,9 +386,7 @@ export async function embedAndStoreChunks(opts: {
     toEmbed.push({ idx, text, contentHash });
   }
 
-  if (!toEmbed.length) {
-    return { stored: 0, skipped, failed: false };
-  }
+  if (!toEmbed.length) return { stored: 0, skipped, failed: false };
 
   const batchSize = EMBED_CONFIG.maxTextsPerBatch;
   const newRecords: VectorRecord[] = [];
@@ -201,14 +394,12 @@ export async function embedAndStoreChunks(opts: {
     for (let i = 0; i < toEmbed.length; i += batchSize) {
       const batch = toEmbed.slice(i, i + batchSize);
       const vectors = await provider.embedDocuments(batch.map(b => b.text));
-      if (vectors.length !== batch.length) {
-        throw new Error('embed batch length mismatch');
-      }
+      if (vectors.length !== batch.length) throw new Error('embed batch length mismatch');
       const now = new Date().toISOString();
       for (let j = 0; j < batch.length; j++) {
         const emb = vectors[j];
-        if (!emb || emb.length !== dimension) {
-          throw new Error('embed dimension mismatch');
+        if (!emb || emb.length !== dimension || emb.some(value => !Number.isFinite(value))) {
+          throw new Error('embed dimension or value mismatch');
         }
         const b = batch[j];
         newRecords.push({
@@ -217,6 +408,7 @@ export async function embedAndStoreChunks(opts: {
           idx: b.idx,
           text: b.text.slice(0, 2000),
           embedding: emb,
+          annBuckets: annBucketKeys(emb, corpusKey),
           corpusKey,
           contentHash: b.contentHash,
           embeddingModel: model,
@@ -236,19 +428,14 @@ export async function embedAndStoreChunks(opts: {
     const db = await openDb();
     await new Promise<void>((resolve, reject) => {
       const tx = db.transaction(VECTOR_STORE, 'readwrite');
-      for (const rec of newRecords) {
-        tx.objectStore(VECTOR_STORE).put(rec);
-      }
+      const store = tx.objectStore(VECTOR_STORE);
+      for (const rec of newRecords) store.put(rec);
       for (const prev of existing) {
-        if (!newRecords.some(rec => rec.id === prev.id)) {
-          tx.objectStore(VECTOR_STORE).delete(prev.id);
-        }
+        if (!newRecords.some(rec => rec.id === prev.id)) store.delete(prev.id);
       }
       const maxIdx = chunks.length;
       for (const prev of existing) {
-        if (prev.idx >= maxIdx) {
-          tx.objectStore(VECTOR_STORE).delete(prev.id);
-        }
+        if (prev.idx >= maxIdx) store.delete(prev.id);
       }
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
@@ -304,22 +491,17 @@ export function rankVectorsByQueryEmbedding(
   const minScore = opts?.minScore ?? -1;
   const topK = opts?.topK ?? 200;
   const live = opts?.liveFileIds;
-
-  if (!queryEmbedding.length || queryEmbedding.length !== dimension) {
+  if (!queryEmbedding.length || queryEmbedding.length !== dimension || queryEmbedding.some(v => !Number.isFinite(v))) {
     return [];
   }
 
   const best = new Map<string, NeuralHit>();
   for (const v of vectors) {
     if (live && !live.has(v.fileId)) continue;
-    if (v.embeddingModel !== model) continue;
-    if (v.embeddingVersion !== version) continue;
-    if (v.dimension !== dimension) continue;
-    if (!Array.isArray(v.embedding) || v.embedding.length !== dimension) continue;
-
+    if (v.embeddingModel !== model || v.embeddingVersion !== version || v.dimension !== dimension) continue;
+    if (!Array.isArray(v.embedding) || v.embedding.length !== dimension || v.embedding.some(x => !Number.isFinite(x))) continue;
     const sim = cosineSimilarity(queryEmbedding, v.embedding);
-    if (sim < minScore) continue;
-
+    if (!Number.isFinite(sim) || sim < minScore) continue;
     const prev = best.get(v.fileId);
     if (!prev || sim > prev.score) {
       best.set(v.fileId, {
@@ -330,16 +512,41 @@ export function rankVectorsByQueryEmbedding(
       });
     }
   }
-
   return [...best.values()].sort((a, b) => b.score - a.score).slice(0, topK);
+}
+
+export interface AnnSearchMetrics {
+  totalVectors: number;
+  candidateVectors: number;
+  usedAnn: boolean;
+  bucketsRead: number;
 }
 
 export async function searchNeuralByEmbedding(
   queryEmbedding: number[],
   corpusKey: string,
-  opts?: { minScore?: number; topK?: number; liveFileIds?: Set<string> }
+  opts?: {
+    minScore?: number;
+    topK?: number;
+    liveFileIds?: Set<string>;
+    exactSearchThreshold?: number;
+    onMetrics?: (metrics: AnnSearchMetrics) => void;
+  }
 ): Promise<NeuralHit[]> {
-  const vectors = await listVectors(corpusKey);
+  const totalVectors = await countVectors(corpusKey);
+  const exactSearchThreshold = opts?.exactSearchThreshold ?? DEFAULT_EXACT_SEARCH_THRESHOLD;
+  const exact = totalVectors <= exactSearchThreshold;
+  let vectors: VectorRecord[];
+  let bucketsRead = 0;
+  if (exact) {
+    vectors = await listVectors(corpusKey);
+  } else {
+    await ensureAnnIndex(corpusKey);
+    const keys = annBucketKeys(queryEmbedding, corpusKey);
+    bucketsRead = keys.length;
+    vectors = await getVectorsForAnnBuckets(keys);
+  }
+  opts?.onMetrics?.({ totalVectors, candidateVectors: vectors.length, usedAnn: !exact, bucketsRead });
   return rankVectorsByQueryEmbedding(queryEmbedding, vectors, {
     minScore: opts?.minScore,
     topK: opts?.topK,

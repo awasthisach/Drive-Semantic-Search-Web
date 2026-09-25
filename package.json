@@ -11,6 +11,7 @@
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
     "test": "vitest run",
+    "evaluate:relevance": "vitest run src/lib/__tests__/vectorIndex.relevance.test.ts --reporter=verbose",
     "test:watch": "vitest",
     "test:idb": "vitest run src/lib/__tests__/contentIndex.integration.test.ts",
     "check:bundle": "node scripts/check-bundle-size.mjs",
