@@ -124,6 +124,18 @@ After Worker + Pages are aligned:
 
 **Live multilingual proof cannot be claimed from unit tests alone.**
 
+### Secrets and deployment checklist
+
+The web app itself does **not** require a secret in `.env`: `VITE_EMBED_ENDPOINT` is a public Worker URL, and every `VITE_*` value is bundled into the browser. Do not put a Gemini key, Cloudflare token, Firebase private key, or OAuth client secret there.
+
+1. Create or select a Gemini API key in [Google AI Studio](https://aistudio.google.com/app/apikey). Keep the key server-side only.
+2. In [Cloudflare Workers & Pages](https://dash.cloudflare.com/?to=/:account/workers), open the `drive-semantic-embed` Worker → **Settings** → **Variables and Secrets** → **Add** → **Encrypt**, and set `GEMINI_API_KEY` to that key. Set `FIREBASE_PROJECT_ID` to the Firebase project ID as a plain Worker variable.
+3. For CI deployment, open the repository’s [GitHub Actions secrets page](https://github.com/awasthisach/Drive-Semantic-Search-Web/settings/secrets/actions) and add `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`. Add `FIREBASE_TEST_ID_TOKEN` only if the authenticated Worker contract check is enabled for your deployment.
+4. Keep `ALLOWED_ORIGIN` equal to the deployed Pages origin (default: `https://awasthisach.github.io`). If you deploy under a different domain, update this Worker variable before deploying the SPA.
+5. Deploy the Worker first (`cd workers/embed && npm ci && npm run check && npm run deploy`), then deploy the SPA. Sign in, index extractable content, and run a search to verify the authenticated embed path.
+
+Google Drive OAuth uses the public client configuration in `firebase-applet-config.json`; configure its authorized JavaScript origins and redirect domains in the [Google Cloud Credentials console](https://console.cloud.google.com/apis/credentials) and Firebase Authentication console. These client IDs are intentionally public and are not repository secrets.
+
 ---
 
 ## Honest limits
