@@ -18,7 +18,7 @@ Client-side web app for Google Drive: sync, **hybrid search** (neural cosine + B
 - **Hybrid search**
   - **Metadata** — filename, summary, tags (exact name boost)
   - **BM25 body** — IndexedDB postings over extracted Drive text
-  - **Neural (optional)** — Gemini Embedding 2 (768 dimensions, compatibility version 2) via authenticated Worker → cosine over chunk vectors → hybrid blend
+  - **Neural (optional)** — Gemini Embedding 2 (768 dimensions, compatibility version 3) via authenticated Worker → cosine over chunk vectors → hybrid blend
   - Highlight chips, match reasons, Star / Pin offline / Copy link on results
   - Hindi/Hinglish query expansion (lightweight pairs; preserves Devanagari combining marks)
 - **Content + vector index** — IndexedDB BM25 docs/chunks/postings **and** separate vector store; content-hash skip re-embed; cancel + progress; **resume cursor** (SHA-256 signature of corpus file list)
@@ -104,16 +104,16 @@ Production Worker URL (public, not a secret):
 
 `https://drive-semantic-embed.awasthi-sach.workers.dev`
 
-The SPA defaults to this URL. CI uses repository secret `VITE_EMBED_ENDPOINT` when set, otherwise the same default.
+The SPA defaults to this URL. CI uses repository secret `VITE_EMBED_ENDPOINT` when set, otherwise the same default. `VITE_EMBED_ENDPOINT` is public configuration, not a credential.
 
-Worker must run **`workers/embed/src/index.ts`** (JSON `{ embeddings, model, version, dimension }`, with version `2`). A dashboard stub that returns plain `Unauthorized` will not work. Worker deployment is controlled by `.github/workflows/deploy-worker.yml` and requires `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` GitHub secrets.
+Worker must run **`workers/embed/src/index.ts`** (JSON `{ embeddings, model, version, dimension }`, with version `3`). A dashboard stub that returns plain `Unauthorized` will not work. Worker deployment is controlled by `.github/workflows/deploy-worker.yml` and requires `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` GitHub secrets.
 
 Required Worker secrets/vars:
 
 - Secret `GEMINI_API_KEY`
 - Variable or secret `FIREBASE_PROJECT_ID=thevvforg`
 - CORS origin default: `https://awasthisach.github.io`
-- Model `gemini-embedding-2`, dimension `768`, embedding compatibility version `2`
+- Model `gemini-embedding-2`, dimension `768`, embedding compatibility version `3`
 
 After Worker + Pages are aligned:
 
@@ -130,7 +130,7 @@ The web app itself does **not** require a secret in `.env`: `VITE_EMBED_ENDPOINT
 
 1. Create or select a Gemini API key in [Google AI Studio](https://aistudio.google.com/app/apikey). Keep the key server-side only.
 2. In [Cloudflare Workers & Pages](https://dash.cloudflare.com/?to=/:account/workers), open the `drive-semantic-embed` Worker → **Settings** → **Variables and Secrets** → **Add** → **Encrypt**, and set `GEMINI_API_KEY` to that key. Set `FIREBASE_PROJECT_ID` to the Firebase project ID as a plain Worker variable.
-3. For CI deployment, open the repository’s [GitHub Actions secrets page](https://github.com/awasthisach/Drive-Semantic-Search-Web/settings/secrets/actions) and add `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`. Add `FIREBASE_TEST_ID_TOKEN` only if the authenticated Worker contract check is enabled for your deployment.
+3. For CI deployment, open the repository’s [GitHub Actions secrets page](https://github.com/awasthisach/Drive-Semantic-Search-Web/settings/secrets/actions) and add `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`. Add `FIREBASE_TEST_EMAIL` and `FIREBASE_TEST_PASSWORD` for the authenticated Worker contract gate. Create a dedicated low-privilege Firebase test user; these are CI-only credentials.
 4. Keep `ALLOWED_ORIGIN` equal to the deployed Pages origin (default: `https://awasthisach.github.io`). If you deploy under a different domain, update this Worker variable before deploying the SPA.
 5. Deploy the Worker first (`cd workers/embed && npm ci && npm run check && npm run deploy`), then deploy the SPA. Sign in, index extractable content, and run a search to verify the authenticated embed path.
 
@@ -157,7 +157,7 @@ Google Drive OAuth uses the public client configuration in `firebase-applet-conf
 - Content-index prune is corpus-scoped and skipped when list is truncated
 - Race-free durable meta + hash snapshot persist
 - Embed API failure keeps prior valid vectors; search falls back without neural
-- Version-1 vectors are incompatible and are migrated only after successful version-2 re-embedding
+- Version-1 and version-2 vectors are incompatible and are migrated only after successful version-3 re-embedding
 
 ---
 
