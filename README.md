@@ -1,12 +1,12 @@
 # Drive Semantic Search
 
-Client-side web app for Google Drive: sync, **hybrid search** (neural cosine + BM25 + metadata), offline pin, encrypted vault, and SHA-256 duplicate verification.
+Client-side Progressive Web App for Google Drive with **hybrid semantic search** (neural vector similarity + BM25 + metadata), offline pinning, encrypted vault, duplicate verification, and Drive management features.
 
 **Live:** https://awasthisach.github.io/Drive-Semantic-Search-Web/
 
 **Embed Worker:** https://drive-semantic-embed.awasthi-sach.workers.dev
 
-**HEAD notes:** Search uses neural retrieval when the Worker is reachable and vectors are indexed. If the Worker is down, search falls back to **BM25 + metadata**.
+**Runtime rule:** Neural retrieval is used only when the authenticated embedding Worker is reachable and compatible vectors are indexed. If embeddings are unavailable, search remains usable through **BM25 + metadata** fallback.
 
 ---
 
@@ -37,6 +37,31 @@ React 19 · Vite 6 · Tailwind 4 · TypeScript strict · Firebase Auth + GIS · 
 
 ---
 
+## Quick setup instructions
+
+### Normal development checkout
+
+1. Install a current Node.js LTS release.
+2. Clone the repository and enter it.
+3. Run `npm ci`.
+4. Run `npm run dev` for local development.
+5. Before submitting changes, run `npm run lint`, `npm test`, and `npm run build`.
+
+### Production neural-search setup
+
+1. Deploy the Worker from `workers/embed`.
+2. Configure the Worker secret `GEMINI_API_KEY` and variable `FIREBASE_PROJECT_ID`.
+3. Keep `ALLOWED_ORIGIN` equal to the actual Pages origin.
+4. Deploy the SPA only after the Worker endpoint is reachable and authenticated requests return the expected embedding response.
+5. Sign in to the live app and run **Index extractable content** before testing neural search.
+6. Test both a semantic query and a normal filename/keyword query.
+7. Verify that an embedding failure still returns BM25 + metadata results.
+
+**Security rule:** every `VITE_*` value is public because it is bundled into the browser. Never put `GEMINI_API_KEY`, Cloudflare API tokens, Firebase private keys, service-account credentials, or OAuth client secrets in frontend environment variables or committed files.
+
+**Verification rule:** a green GitHub Actions build proves the code/build pipeline passed; it does **not** by itself prove that Google OAuth, Drive access, the Cloudflare Worker, or live neural retrieval works. Those must be runtime-tested.
+
+---
 ## Scripts
 
 ```bash
@@ -92,7 +117,7 @@ Incremental extract / index
 | BM25 | 0.25 |
 | Metadata | 0.20 |
 
-These are **not** eval-validated on a real Drive/Gemini corpus. Tune after live ranking inspection.
+These are **not** eval-validated on a representative real Drive/Gemini corpus. Treat them as provisional until live ranking evaluation is performed.
 
 If the embed pipeline fails or is not configured, search **falls back** to BM25 + metadata (does not hard-fail).
 
