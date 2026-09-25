@@ -12,9 +12,9 @@ const PAIRS: [string, string][] = [
 ];
 
 const SEMANTIC_VARIANTS: Record<string, string[]> = {
-  cannabis: ['cannabis', 'hemp', 'bhang', 'भांग', 'कैनबिस'],
-  hemp: ['hemp', 'cannabis', 'bhang', 'भांग', 'कैनबिस'],
-  bhang: ['bhang', 'cannabis', 'hemp', 'भांग', 'कैनबिस'],
+  cannabis: ['cannabis', 'hemp', 'भांग', 'bhang', 'कैनबिस'],
+  hemp: ['hemp', 'cannabis', 'भांग', 'bhang', 'कैनबिस'],
+  bhang: ['bhang', 'cannabis', 'भांग', 'hemp', 'कैनबिस'],
   भांग: ['भांग', 'bhang', 'cannabis', 'hemp', 'कैनबिस'],
   कैनबिस: ['कैनबिस', 'cannabis', 'hemp', 'bhang', 'भांग'],
 };
