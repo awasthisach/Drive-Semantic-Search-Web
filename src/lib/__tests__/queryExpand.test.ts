@@ -24,3 +24,12 @@ describe('expandTerms', () => {
     expect(variants.length).toBeLessThanOrEqual(8);
   });
 });
+
+
+describe('expandSemanticQueries request budget', () => {
+  it('caps neural variants to three requests', async () => {
+    const { expandSemanticQueries } = await import('../queryExpand');
+    expect(expandSemanticQueries('cannabis').length).toBeLessThanOrEqual(3);
+    expect(expandSemanticQueries('ordinary query').length).toBe(1);
+  });
+});
