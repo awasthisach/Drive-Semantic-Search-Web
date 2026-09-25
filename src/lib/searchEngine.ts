@@ -205,6 +205,20 @@ export async function runHybridSearch(
 
     if (score <= 0) continue;
 
+    // Precision guard: exact filename/phrase matches should not be buried by
+    // a broad semantic hit. Keep this bounded until corpus-based evaluation.
+    const normalizedQuery = query.toLowerCase().trim();
+    const normalizedName = file.name.toLowerCase();
+    const normalizedStem = normalizedName.replace(/\\.[a-z0-9]{1,8}$/i, '');
+    const exactName = normalizedName === normalizedQuery || normalizedStem === normalizedQuery;
+    const phraseMatch = query.trim().length > 1 &&
+      (normalizedName.includes(normalizedQuery) || (file.semanticSummary || '').toLowerCase().includes(normalizedQuery));
+    const precisionBoost = exactName ? 18 : phraseMatch ? 6 : 0;
+    if (precisionBoost) {
+      score = Math.min(100, score + precisionBoost);
+      reasons.unshift(exactName ? 'Exact filename precision boost' : 'Phrase precision boost');
+    }
+
     results.push({
       file,
       score: Math.min(score, 100),
