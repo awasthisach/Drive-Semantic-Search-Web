@@ -6,7 +6,7 @@ Client-side Progressive Web App for Google Drive with **hybrid semantic search**
 
 **Embed Worker:** https://drive-semantic-embed.awasthi-sach.workers.dev
 
-**Runtime rule:** Neural retrieval is used only when the authenticated embedding Worker is reachable and compatible vectors are indexed. If embeddings are unavailable, search remains usable through **BM25 + metadata** fallback.
+**Runtime rule:** Neural retrieval is used only when the authenticated embedding Worker is reachable and compatible vectors are indexed. Large corpora use ANN candidates followed by exact cosine reranking; if ANN returns no qualified hit, the search automatically performs an exact corpus scan before returning no neural result. If embeddings are unavailable, search remains usable through **BM25 + metadata** fallback.
 
 ---
 
@@ -108,7 +108,7 @@ Incremental extract / index
 |--------|-------------|
 | Metadata | Always |
 | BM25 body | After “Index extractable content” |
-| Neural cosine | Worker reachable **and** vectors stored during index; exact scan for ≤128 vectors, IndexedDB LSH candidates above that |
+| Neural cosine | Worker reachable **and** vectors stored during index; exact scan for ≤128 vectors, IndexedDB LSH candidates above that, exact fallback when ANN has no qualified hit |
 
 **Provisional hybrid weights** (code: `HYBRID_WEIGHTS` in `src/lib/searchEngine.ts`):
 
@@ -167,7 +167,7 @@ Google Drive OAuth uses the public client configuration in `firebase-applet-conf
 ## Honest limits
 
 - Hybrid weights are **provisional** until eval on real Gemini embeddings
-- Large-corpus vector search uses a versioned IndexedDB multi-probe LSH index and exact cosine re-ranking of candidates; first use backfills the derived index with a streaming cursor
+- Large-corpus vector search uses a versioned IndexedDB multi-probe LSH index and exact cosine re-ranking of candidates; first use backfills the derived index with a streaming cursor. If the ANN candidate set is empty or produces no qualified hit, an exact corpus scan is used as a correctness fallback.
 - ANN relevance is regression-tested on a deterministic, labeled fixture, not on real user Drive data; do not interpret the fixture as proof of production semantic quality or use it to tune hybrid weights
 - No full PDF/DOCX/OCR pipeline in browser yet (text extraction where Drive/export supports it)
 - Filtered type syncs use full list; incremental only for type = **all**

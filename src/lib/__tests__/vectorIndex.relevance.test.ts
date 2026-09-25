@@ -11,7 +11,9 @@ import { EMBED_CONFIG } from '../embeddings/config';
 const DB_NAME = 'drive-vector-index';
 const DB_VERSION = 2;
 const VECTOR_STORE = 'vectors';
+const ANN_META_STORE = 'annMetadata';
 const CORPUS_KEY = 'ann-relevance-evaluation';
+const FALLBACK_CORPUS_KEY = 'ann-exact-fallback';
 const TOPIC_COUNT = 8;
 const DOCS_PER_TOPIC = 10;
 const TOP_K = 5;
@@ -105,6 +107,19 @@ function seedRecords(records: VectorRecord[]): Promise<void> {
     const tx = db.transaction(VECTOR_STORE, 'readwrite');
     const store = tx.objectStore(VECTOR_STORE);
     for (const record of records) store.put(record);
+    tx.oncomplete = () => { db.close(); resolve(); };
+    tx.onerror = () => { db.close(); reject(tx.error); };
+  }));
+}
+
+function markAnnIndexCurrent(corpusKey: string): Promise<void> {
+  return openFixtureDb().then(db => new Promise((resolve, reject) => {
+    const tx = db.transaction(ANN_META_STORE, 'readwrite');
+    tx.objectStore(ANN_META_STORE).put({
+      id: `ann-index:${corpusKey}`,
+      version: 'sparse-rp-lsh-v2-scoped',
+      indexedAt: '2026-01-01T00:00:00.000Z',
+    });
     tx.oncomplete = () => { db.close(); resolve(); };
     tx.onerror = () => { db.close(); reject(tx.error); };
   }));
@@ -209,5 +224,37 @@ describe('IndexedDB ANN relevance and retrieval evaluation', () => {
       averageCandidateReduction: `${Math.round((1 - average(candidateRatios)) * 100)}%`,
     };
     console.info(`ANN_RELEVANCE_REPORT ${JSON.stringify(report)}`);
+  });
+
+  it('falls back to exact search when an ANN index has no candidates', async () => {
+    const record = {
+      ...makeRecord(0, 0),
+      id: `${FALLBACK_CORPUS_KEY}::fallback#0`,
+      fileId: 'fallback',
+      corpusKey: FALLBACK_CORPUS_KEY,
+      annBuckets: undefined,
+    };
+    await seedRecords([record]);
+    // Simulate a current-but-empty derived index after a partial migration.
+    await markAnnIndexCurrent(FALLBACK_CORPUS_KEY);
+
+    let metrics: {
+      totalVectors: number;
+      candidateVectors: number;
+      usedAnn: boolean;
+      bucketsRead: number;
+      usedExactFallback: boolean;
+      fallbackReason?: string;
+    } | undefined;
+    const results = await searchNeuralByEmbedding(CENTROIDS[0], FALLBACK_CORPUS_KEY, {
+      exactSearchThreshold: 0,
+      onMetrics: value => { metrics = value; },
+    });
+
+    expect(results[0]?.fileId).toBe('fallback');
+    expect(metrics?.usedAnn).toBe(true);
+    expect(metrics?.candidateVectors).toBe(0);
+    expect(metrics?.usedExactFallback).toBe(true);
+    expect(metrics?.fallbackReason).toBe('empty-candidates');
   });
 });
