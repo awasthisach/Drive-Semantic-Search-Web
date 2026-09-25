@@ -16,7 +16,8 @@ const allowUnauthenticated = process.argv.includes('--allow-unauthenticated');
 
 async function getFirebaseIdToken() {
   if (process.env.FIREBASE_TEST_ID_TOKEN) return process.env.FIREBASE_TEST_ID_TOKEN;
-  const email = process.env.FIREBASE_TEST_EMAIL || '';
+  // GitHub secret values can accidentally include a copied leading/trailing space.
+  const email = (process.env.FIREBASE_TEST_EMAIL || '').trim();
   const password = process.env.FIREBASE_TEST_PASSWORD || '';
   if (!email || !password) {
     throw new Error('Set FIREBASE_TEST_EMAIL and FIREBASE_TEST_PASSWORD (or FIREBASE_TEST_ID_TOKEN) for the authenticated live contract gate');
