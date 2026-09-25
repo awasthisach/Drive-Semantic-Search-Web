@@ -9,6 +9,7 @@
 - IndexedDB के `multiEntry` index से केवल उन buckets के records लोड होते हैं; फिर **exact cosine similarity** से re-rank किया जाता है। गलत/पुराने model, version, dimension, live-file filter और `topK` के मौजूदा guards लागू रहते हैं।
 - 128 या कम vectors के corpus पर existing exact search रखा है—छोटे corpus में ANN index overhead नहीं जोड़ा जाता।
 - पहले ANN query पर पुराने v1 records का index corpus-scoped, streaming IndexedDB cursor से backfill होता है। Migration metadata में algorithm version है; index बदले तो derived buckets फिर बनेंगे।
+- बड़े corpus में यदि ANN candidate set खाली हो या सभी candidates `minScore` के कारण reject हो जाएँ, तो `searchNeuralByEmbedding` स्वतः पूरे corpus पर exact cosine scan करता है। इससे partial/empty ANN index के कारण silent empty result नहीं आता। `onMetrics` में `usedExactFallback` और `fallbackReason` (`empty-candidates` या `no-qualified-hits`) मिलते हैं।
 - नए vectors embedding/write transaction में bucket keys समेत सहेजे जाते हैं। API embedding failure पर पहले की तरह valid vectors नहीं हटते।
 
 ## Reproducible benchmark
@@ -40,7 +41,7 @@ Test report हर run पर stdout में `ANN_RELEVANCE_REPORT` JSON क�
 
 यह **deterministic algorithm regression fixture** है: vectors को अलग topical clusters के रूप में निर्धारित किया गया है। इससे IndexedDB migration, candidate-only retrieval, exact reranking और code regression जाँचे जाते हैं; यह असली Gemini embeddings, multilingual queries, किसी उपयोगकर्ता की Google Drive या बड़े वास्तविक corpus की relevance का प्रमाण **नहीं** है। इसीलिए hybrid ranking weights provisional ही रहते हैं। Real-corpus quality के लिए सहमति से चुने गए query/document relevance labels और live embedding outputs चाहिए; Drive सामग्री इस repo में नहीं डाली जाती।
 
-87% का आँकड़ा 80-vector fixture में **candidate reduction** है, end-to-end latency या बड़े corpus पर तय performance guarantee नहीं। पहले ANN query को पुराने vectors का derived index backfill करना पड़ सकता है। Candidate overlap और size वास्तविक embedding distribution, corpus और LSH parameters पर निर्भर होंगे। यदि relevance/latency regression मिले तो exact-search threshold और LSH configuration को labeled real-corpus evaluation से tune करें।
+87% का आँकड़ा 80-vector fixture में **candidate reduction** है, end-to-end latency या बड़े corpus पर तय performance guarantee नहीं। पहले ANN query को पुराने vectors का derived index backfill करना पड़ सकता है। सामान्य ANN path में candidate miss होने पर exact fallback correctness बचाता है, लेकिन उस query की latency exact scan जितनी हो सकती है। Candidate overlap और size वास्तविक embedding distribution, corpus और LSH parameters पर निर्भर होंगे। यदि fallback rate या latency अधिक मिले तो exact-search threshold और LSH configuration को labeled real-corpus evaluation से tune करें।
 
 ## बदलाव / validation स्थिति
 

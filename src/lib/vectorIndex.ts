@@ -520,6 +520,8 @@ export interface AnnSearchMetrics {
   candidateVectors: number;
   usedAnn: boolean;
   bucketsRead: number;
+  usedExactFallback: boolean;
+  fallbackReason?: 'empty-candidates' | 'no-qualified-hits';
 }
 
 export async function searchNeuralByEmbedding(
@@ -530,6 +532,8 @@ export async function searchNeuralByEmbedding(
     topK?: number;
     liveFileIds?: Set<string>;
     exactSearchThreshold?: number;
+    /** Run an exact corpus scan when ANN returns no usable result. Enabled by default. */
+    exactFallback?: boolean;
     onMetrics?: (metrics: AnnSearchMetrics) => void;
   }
 ): Promise<NeuralHit[]> {
@@ -546,10 +550,36 @@ export async function searchNeuralByEmbedding(
     bucketsRead = keys.length;
     vectors = await getVectorsForAnnBuckets(keys);
   }
-  opts?.onMetrics?.({ totalVectors, candidateVectors: vectors.length, usedAnn: !exact, bucketsRead });
-  return rankVectorsByQueryEmbedding(queryEmbedding, vectors, {
+  const usedAnn = !exact;
+  const annHits = rankVectorsByQueryEmbedding(queryEmbedding, vectors, {
     minScore: opts?.minScore,
     topK: opts?.topK,
     liveFileIds: opts?.liveFileIds,
   });
+  const shouldFallback = usedAnn && (opts?.exactFallback ?? true) && annHits.length === 0;
+  if (shouldFallback) {
+    const exactVectors = await listVectors(corpusKey);
+    const exactHits = rankVectorsByQueryEmbedding(queryEmbedding, exactVectors, {
+      minScore: opts?.minScore,
+      topK: opts?.topK,
+      liveFileIds: opts?.liveFileIds,
+    });
+    opts?.onMetrics?.({
+      totalVectors,
+      candidateVectors: vectors.length,
+      usedAnn: true,
+      bucketsRead,
+      usedExactFallback: true,
+      fallbackReason: vectors.length === 0 ? 'empty-candidates' : 'no-qualified-hits',
+    });
+    return exactHits;
+  }
+  opts?.onMetrics?.({
+    totalVectors,
+    candidateVectors: vectors.length,
+    usedAnn,
+    bucketsRead,
+    usedExactFallback: false,
+  });
+  return annHits;
 }
