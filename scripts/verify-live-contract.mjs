@@ -12,6 +12,8 @@ const expectedModel = 'gemini-embedding-2';
 const expectedVersion = '3';
 const expectedDimension = 768;
 
+const allowUnauthenticated = process.argv.includes('--allow-unauthenticated');
+
 async function getFirebaseIdToken() {
   if (process.env.FIREBASE_TEST_ID_TOKEN) return process.env.FIREBASE_TEST_ID_TOKEN;
   const email = process.env.FIREBASE_TEST_EMAIL || '';
@@ -41,7 +43,7 @@ async function getFirebaseIdToken() {
   return body.idToken;
 }
 
-const token = await getFirebaseIdToken();
+const token = allowUnauthenticated ? null : await getFirebaseIdToken();
 const health = await fetch(healthEndpoint, { method: 'GET' });
 const healthBody = await health.json().catch(() => null);
 if (!health.ok || !healthBody || healthBody.model !== expectedModel || healthBody.version !== expectedVersion || healthBody.dimension !== expectedDimension) {
@@ -53,6 +55,12 @@ const unauth = await fetch(healthEndpoint.replace(/\/$/, '') + embedPath, {
   body: JSON.stringify({ texts: ['unauthenticated contract probe'], mode: 'query', version: '3' }),
 });
 if (unauth.status !== 401) throw new Error('Live Worker auth gate expected HTTP 401, got ' + unauth.status);
+
+if (allowUnauthenticated) {
+  console.warn('Authenticated live contract checks skipped because Firebase test credentials were not provided.');
+  console.log('Live Worker public contract passed: health/config and unauthenticated auth gate');
+  process.exit(0);
+}
 
 async function verify(mode, texts, version, expectedResponseVersion = version) {
   const response = await fetch(healthEndpoint.replace(/\/$/, '') + embedPath, {
