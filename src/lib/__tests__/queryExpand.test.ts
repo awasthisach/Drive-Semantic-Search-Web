@@ -21,6 +21,6 @@ describe('expandTerms', () => {
     expect(variants).toContain('cannabis report');
     expect(variants).toContain('hemp report');
     expect(variants).toContain('भांग report');
-    expect(variants.length).toBeLessThanOrEqual(8);
+    expect(variants.length).toBeLessThanOrEqual(3);
   });
 });
