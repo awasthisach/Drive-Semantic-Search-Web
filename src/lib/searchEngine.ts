@@ -205,6 +205,20 @@ export async function runHybridSearch(
 
     if (score <= 0) continue;
 
+    // Precision guard: an exact filename/phrase match should remain visible
+    // even when a semantically broad neural hit scores higher. This is a
+    // bounded post-blend boost, not a replacement for corpus-based tuning.
+    const exactName = file.name.toLowerCase() === query.toLowerCase().trim()
+      || file.name.replace(/\.[a-z0-9]{1,8}$/i, '').toLowerCase() === query.toLowerCase().trim();
+    const phraseMatch = query.trim().length > 1
+      && (file.name.toLowerCase().includes(query.toLowerCase().trim())
+        || (file.semanticSummary || '').toLowerCase().includes(query.toLowerCase().trim()));
+    const precisionBoost = exactName ? 18 : phraseMatch ? 6 : 0;
+    if (precisionBoost) {
+      score = Math.min(100, score + precisionBoost);
+      reasons.unshift(exactName ? 'Exact filename precision boost' : 'Phrase precision boost');
+    }
+
     results.push({
       file,
       score: Math.min(score, 100),
