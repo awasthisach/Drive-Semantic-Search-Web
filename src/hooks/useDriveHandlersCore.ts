@@ -160,9 +160,11 @@ export function useDriveHandlersCore(s: DriveAppState) {
       return;
     }
     syncInFlightRef.current = true;
+    setSyncStats(s => ({ ...s, status: 'syncing' }));
     let token = (await ensureValidToken()) || googleAccessToken || (await getAccessToken());
     if (!token) {
       syncInFlightRef.current = false;
+      setSyncStats(s => ({ ...s, status: 'error' }));
       handleGoogleSignIn();
       return;
     }
@@ -208,14 +210,17 @@ export function useDriveHandlersCore(s: DriveAppState) {
             showDriveToast('Session refreshed — sync completed');
           } catch (retryErr: any) {
             showDriveToast('Sync failed after refresh: ' + (retryErr?.message || 'error'));
+            setSyncStats(s => ({ ...s, status: 'error' }));
           }
         } else {
           showDriveToast('Session expired — Sign in again');
           setGoogleAccessToken(null);
           setIsGoogleConnected(false);
+          setSyncStats(s => ({ ...s, status: 'error' }));
         }
       } else {
         showDriveToast('Sync failed: ' + msg);
+        setSyncStats(s => ({ ...s, status: 'error' }));
       }
     } finally {
       setIsGoogleLoading(false);

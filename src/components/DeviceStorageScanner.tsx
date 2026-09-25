@@ -1,28 +1,22 @@
 import React, { useState, useMemo, useRef } from 'react';
 import {
-  Smartphone, HardDrive, FolderSearch, Trash2, Cloud, Lock, Copy, AlertTriangle,
-  CheckCircle2, Search, Filter, CheckSquare, Square, ArrowRightLeft, UploadCloud,
-  FileVideo, FileText, FileArchive, Image as ImageIcon, Sparkles, RefreshCw,
-  FolderOpen, Folder, X, Layers, Zap,
+  CheckCircle2, CheckSquare, Square, X,
 } from 'lucide-react';
 import {
-  DeviceStorageFile, StorageSource, StorageDeviceStats, DriveFile, VaultFile, FileCategory,
+  DeviceStorageFile, StorageSource, DriveFile, FileCategory,
 } from '../types';
-import { INITIAL_PHONE_STATS, INITIAL_SD_STATS, MOCK_DEVICE_FILES } from '../lib/deviceStorageMock';
+import { MOCK_DEVICE_FILES } from '../lib/deviceStorageMock';
 import { formatBytes } from '../lib/driveApi';
 
 interface DeviceStorageScannerProps {
   onImportToDrive: (file: DriveFile) => void;
-  onImportToVault: (vaultFile: VaultFile) => void;
   onSelectPreviewFile?: (file: DriveFile) => void;
 }
 
 export const DeviceStorageScanner: React.FC<DeviceStorageScannerProps> = ({
-  onImportToDrive, onImportToVault, onSelectPreviewFile,
+  onImportToDrive, onSelectPreviewFile,
 }) => {
   const [deviceFiles, setDeviceFiles] = useState<DeviceStorageFile[]>(MOCK_DEVICE_FILES);
-  const [phoneStats, setPhoneStats] = useState<StorageDeviceStats>(INITIAL_PHONE_STATS);
-  const [sdStats, setSdStats] = useState<StorageDeviceStats>(INITIAL_SD_STATS);
   const [isScanning, setIsScanning] = useState(false);
   const [scanProgress, setScanProgress] = useState(0);
   const [scanCurrentItem, setScanCurrentItem] = useState('');
@@ -61,6 +55,24 @@ export const DeviceStorageScanner: React.FC<DeviceStorageScannerProps> = ({
     () => deviceFiles.filter(f => selectedFileIds.has(f.id)),
     [deviceFiles, selectedFileIds]
   );
+
+  const allFilteredSelected = filteredFiles.length > 0 && filteredFiles.every(f => selectedFileIds.has(f.id));
+
+  const asDriveFile = (f: DeviceStorageFile): DriveFile => ({
+    id: `device-preview-${f.id}`,
+    name: f.name,
+    mimeType: f.mimeType,
+    size: f.size,
+    modifiedTime: f.lastModified,
+    createdTime: f.lastModified,
+    category: f.category,
+    isOffline: false,
+    isEncrypted: false,
+    contentHash: `device-${f.id}-${f.size}`,
+    tags: [f.source, f.category, 'device-picker'],
+    semanticSummary: `Selected from ${f.path}. The browser only has access to files you explicitly choose.`,
+    starred: false,
+  });
 
   const handleToggleSelect = (id: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
@@ -134,10 +146,6 @@ export const DeviceStorageScanner: React.FC<DeviceStorageScannerProps> = ({
     showToast(`Indexed ${filesToBackup.length} items locally (not uploaded to Google Drive — bytes stay on device).`);
   };
 
-  const handleEncryptToVault = (_filesToVault: DeviceStorageFile[]) => {
-    showToast('Encryption unavailable: device scan items have no file bytes. Use Privacy Vault to encrypt text you enter yourself.');
-  };
-
   const handleTriggerScan = () => {
     setIsScanning(true);
     setScanProgress(0);
@@ -195,13 +203,35 @@ export const DeviceStorageScanner: React.FC<DeviceStorageScannerProps> = ({
           <option value="phone_internal">Phone</option>
           <option value="sd_card">SD</option>
         </select>
+        <select value={activeTypeFilter} onChange={e => setActiveTypeFilter(e.target.value as typeof activeTypeFilter)}
+          className="px-3 py-2 rounded-xl border text-xs">
+          <option value="all">All file types</option>
+          <option value="document">Documents</option>
+          <option value="image">Images</option>
+          <option value="video">Videos</option>
+          <option value="large">Large files</option>
+          <option value="duplicates">Duplicate candidates</option>
+          <option value="junk">Cache / junk</option>
+        </select>
+        <button
+          type="button"
+          onClick={() => setSelectedFileIds(prev => {
+            const next = new Set(prev);
+            if (allFilteredSelected) filteredFiles.forEach(f => next.delete(f.id));
+            else filteredFiles.forEach(f => next.add(f.id));
+            return next;
+          })}
+          className="px-3 py-2 rounded-xl border text-xs font-semibold"
+        >
+          {allFilteredSelected ? 'Clear visible' : 'Select visible'}
+        </button>
       </div>
 
       {selectedFiles.length > 0 && (
         <div className="flex flex-wrap gap-2 text-xs">
           <span className="font-semibold">{selectedFiles.length} selected</span>
           <button type="button" className="px-2 py-1 rounded-lg border" onClick={() => handleBackupToDrive(selectedFiles)}>Index locally</button>
-          <button type="button" className="px-2 py-1 rounded-lg border" onClick={() => handleEncryptToVault(selectedFiles)}>Encrypt to Vault</button>
+          <span className="px-2 py-1 text-zinc-500">Encrypt text from the Vault tab; picked files are never read or encrypted automatically.</span>
           <button type="button" className="px-2 py-1 rounded-lg border text-red-600" onClick={() => handleDeleteFiles(Array.from(selectedFileIds))}>Remove from list</button>
         </div>
       )}
@@ -216,6 +246,11 @@ export const DeviceStorageScanner: React.FC<DeviceStorageScannerProps> = ({
               <div className="text-sm font-semibold truncate">{f.name}</div>
               <div className="text-[10px] text-zinc-500">{formatBytes(f.size)} • {f.source} • {f.category}</div>
             </div>
+            {onSelectPreviewFile && (
+              <button type="button" onClick={() => onSelectPreviewFile(asDriveFile(f))} className="px-2 py-1 rounded-lg border text-[10px] font-semibold">
+                Details
+              </button>
+            )}
           </div>
         ))}
       </div>
