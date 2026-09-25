@@ -65,9 +65,13 @@ export const MoveToFolderModal: React.FC<MoveToFolderModalProps> = ({
   };
 
   const handleMove = () => {
+    if (!selectedFiles.length) return;
     const target = selectedFolderId === 'root' ? undefined : selectedFolderId;
     onConfirmMove(target);
   };
+  const selectedFolderLabel = selectedFolderId === 'root'
+    ? 'Main Drive (Root / Unfiled)'
+    : folders.find(folder => folder.id === selectedFolderId)?.name || 'Selected folder';
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-150">
@@ -258,7 +262,12 @@ export const MoveToFolderModal: React.FC<MoveToFolderModalProps> = ({
         </div>
 
         {/* Footer Actions */}
-        <div className="p-4 sm:p-5 border-t border-zinc-100 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/60 flex items-center justify-end gap-2.5">
+        <div className="p-4 sm:p-5 border-t border-zinc-100 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/60 space-y-3">
+          <div className="flex items-center gap-2 text-[11px] text-zinc-500" role="status">
+            <FolderInput className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+            <span>Destination: <strong className="text-zinc-800 dark:text-zinc-200">{selectedFolderLabel}</strong></span>
+          </div>
+          <div className="flex items-center justify-end gap-2.5">
           <button
             type="button"
             onClick={onClose}
@@ -269,6 +278,7 @@ export const MoveToFolderModal: React.FC<MoveToFolderModalProps> = ({
           <button
             type="button"
             onClick={handleMove}
+            disabled={!selectedFiles.length}
             className="px-5 py-2 rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white shadow-md hover:shadow-lg transition flex items-center gap-2 min-h-[40px]"
           >
             <CheckCircle2 className="w-4 h-4" />
@@ -276,6 +286,7 @@ export const MoveToFolderModal: React.FC<MoveToFolderModalProps> = ({
               Move {selectedFiles.length} {selectedFiles.length === 1 ? 'Item' : 'Items'} Here
             </span>
           </button>
+          </div>
         </div>
       </div>
     </div>
