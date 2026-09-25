@@ -46,5 +46,12 @@ jobs:
         working-directory: .
         env:
           EMBED_ENDPOINT: ${{ secrets.VITE_EMBED_ENDPOINT || 'https://drive-semantic-embed.awasthi-sach.workers.dev' }}
-          FIREBASE_TEST_ID_TOKEN: ${{ secrets.FIREBASE_TEST_ID_TOKEN }}
-        run: node scripts/verify-live-contract.mjs
+          FIREBASE_TEST_EMAIL: ${{ secrets.FIREBASE_TEST_EMAIL }}
+          FIREBASE_TEST_PASSWORD: ${{ secrets.FIREBASE_TEST_PASSWORD }}
+        run: |
+          if [ -n "$FIREBASE_TEST_EMAIL" ] && [ -n "$FIREBASE_TEST_PASSWORD" ]; then
+            node scripts/verify-live-contract.mjs
+          else
+            echo "::warning::FIREBASE_TEST_EMAIL/FIREBASE_TEST_PASSWORD are not configured; running the public health/auth-gate contract only."
+            node scripts/verify-live-contract.mjs --allow-unauthenticated
+          fi
