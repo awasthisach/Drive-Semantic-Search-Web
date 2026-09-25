@@ -52,6 +52,7 @@ interface AnnProbe {
 
 const projectionCache = new Map<number, ProjectionPlane[][]>();
 const annIndexPromises = new Map<string, Promise<void>>();
+const ANN_LOCK_PREFIX = 'drive-semantic-ann-migration:';
 
 function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -168,7 +169,7 @@ export function getAnnProbeBucketKeys(queryEmbedding: number[], corpusKey = ''):
  */
 async function ensureAnnIndex(corpusKey: string): Promise<void> {
   if (annIndexPromises.has(corpusKey)) return annIndexPromises.get(corpusKey)!;
-  const indexing = (async () => {
+  const migrate = async () => {
     const db = await openDb();
     await new Promise<void>((resolve, reject) => {
       const tx = db.transaction([VECTOR_STORE, ANN_META_STORE], 'readwrite');
@@ -204,6 +205,15 @@ async function ensureAnnIndex(corpusKey: string): Promise<void> {
       tx.onerror = () => reject(migrationError || tx.error || new Error('ANN index migration failed'));
       tx.onabort = () => reject(migrationError || tx.error || new Error('ANN index migration aborted'));
     });
+  };
+  const indexing = (async () => {
+    // Coordinate tabs when Web Locks is available; older/private contexts
+    // retain the transaction-level fallback and remain fully functional.
+    if (typeof navigator !== 'undefined' && navigator.locks?.request) {
+      await navigator.locks.request(ANN_LOCK_PREFIX + corpusKey, { mode: 'exclusive' }, migrate);
+      return;
+    }
+    await migrate();
   })();
   annIndexPromises.set(corpusKey, indexing);
   try {
@@ -211,6 +221,15 @@ async function ensureAnnIndex(corpusKey: string): Promise<void> {
   } catch (error) {
     annIndexPromises.delete(corpusKey);
     throw error;
+  }
+}
+
+/** Warm the derived ANN index without blocking the current search interaction. */
+export async function warmAnnIndex(corpusKey: string): Promise<void> {
+  try {
+    await ensureAnnIndex(corpusKey);
+  } catch (error) {
+    console.warn('[vectorIndex] background ANN warm-up failed', error);
   }
 }
 

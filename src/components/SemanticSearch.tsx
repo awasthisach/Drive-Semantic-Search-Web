@@ -14,7 +14,7 @@ import {
   buildEmbeddingChunks,
 } from '../lib/contentIndex';
 import { highlightSegments } from '../lib/searchHighlight';
-import { embedAndStoreChunks, hasCompatibleVectorSet } from '../lib/vectorIndex';
+import { embedAndStoreChunks, hasCompatibleVectorSet, warmAnnIndex } from '../lib/vectorIndex';
 import { isEmbedConfigured } from '../lib/embeddings/config';
 import { createEmbeddingProvider } from '../lib/embeddings/client';
 import { getFirebaseIdToken } from '../lib/firebaseAuth';
@@ -126,6 +126,26 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
       }
     } catch { setResumeFrom(0); }
   }, [refreshIndexedCount]);
+
+  useEffect(() => {
+    if (indexedCount <= 128) return;
+    let cancelled = false;
+    const run = () => {
+      if (!cancelled) void warmAnnIndex(corpusKey);
+    };
+    const idle = 'requestIdleCallback' in window
+      ? (window as Window & { requestIdleCallback: (cb: () => void, opts?: { timeout: number }) => number })
+          .requestIdleCallback(run, { timeout: 1500 })
+      : globalThis.setTimeout(run, 250);
+    return () => {
+      cancelled = true;
+      if ('cancelIdleCallback' in window && typeof idle === 'number') {
+        (window as Window & { cancelIdleCallback?: (id: number) => void }).cancelIdleCallback?.(idle);
+      } else {
+        globalThis.clearTimeout(idle);
+      }
+    };
+  }, [corpusKey, indexedCount]);
 
   useEffect(() => {
     let cancelled = false;

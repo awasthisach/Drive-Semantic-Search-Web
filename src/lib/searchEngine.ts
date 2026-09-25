@@ -9,6 +9,7 @@ import { isEmbedConfigured } from './embeddings/config';
 import { createEmbeddingProvider } from './embeddings/client';
 import { getFirebaseIdToken } from './firebaseAuth';
 import { searchNeuralByEmbedding } from './vectorIndex';
+import { logDiag } from './diagnostics';
 
 /** Provisional hybrid weights (must sum ~1). Not final without eval. */
 export const HYBRID_WEIGHTS = {
@@ -92,10 +93,23 @@ async function tryNeuralSearch(
         const qVec = await provider.embedQuery(variant);
         if (!qVec.length) continue;
         succeeded++;
+        const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
         const hits = await searchNeuralByEmbedding(qVec, corpusKey, {
           minScore: -1,
           topK: 200,
           liveFileIds,
+          onMetrics: metrics => {
+            const endedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
+            logDiag('info', 'neural.search', JSON.stringify({
+              totalVectors: metrics.totalVectors,
+              candidateVectors: metrics.candidateVectors,
+              usedAnn: metrics.usedAnn,
+              bucketsRead: metrics.bucketsRead,
+              usedExactFallback: metrics.usedExactFallback,
+              fallbackReason: metrics.fallbackReason,
+              latencyMs: Math.round(endedAt - startedAt),
+            }));
+          },
         });
         for (const h of hits) {
           const prev = out.get(h.fileId);
