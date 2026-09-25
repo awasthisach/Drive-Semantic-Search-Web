@@ -49,7 +49,7 @@ export function expandTerms(query: string): string[] {
   return [...out];
 }
 
-/** Return a bounded set of high-confidence whole-query neural variants. */
+/** Return a small high-confidence set of whole-query neural variants. Keep this bounded to avoid multiplying API calls during interactive search. */
 export function expandSemanticQueries(query: string): string[] {
   const trimmed = query.trim();
   if (!trimmed) return [];
@@ -69,5 +69,5 @@ export function expandSemanticQueries(query: string): string[] {
     }
   }
 
-  return [...variants].slice(0, 8);
+  return [...variants].slice(0, 3);
 }
