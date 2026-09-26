@@ -16,11 +16,6 @@ describe('fetchGoogleDriveData validation', () => {
     ).rejects.toThrow(/fileType/);
   });
 
-  it('rejects maxPages out of range', async () => {
-    await expect(fetchGoogleDriveData('tok', 'all', 0)).rejects.toThrow(/maxPages/);
-    await expect(fetchGoogleDriveData('tok', 'all', 101)).rejects.toThrow(/maxPages/);
-  });
-
   it('requires driveId when corpus is drive', async () => {
     await expect(fetchGoogleDriveData('tok', 'all', 1, 'drive')).rejects.toThrow(/driveId/);
   });

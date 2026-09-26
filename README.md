@@ -23,7 +23,7 @@ Client-side Progressive Web App for Google Drive with **hybrid semantic search**
   - Hindi/Hinglish query expansion (lightweight pairs; preserves Devanagari combining marks)
 - **Content + vector index** — IndexedDB BM25 docs/chunks/postings **and** separate vector store; versioned multi-probe LSH bucket index for large-corpus candidate retrieval; content-hash skip re-embed; cancel + progress; **resume cursor** (SHA-256 signature of corpus file list); idle ANN warm-up with Web Locks coordination across tabs
 - **Select all visible** — pagination-aware (current page only)
-- **Offline pin** — IndexedDB LRU + SHA-256; browser storage quota on Offline tab
+- **Offline pin** — IndexedDB LRU + SHA-256; browser storage quota on offline tab
 - **Vault** — PBKDF2 310k + AES-GCM (Worker + main-thread fallback)
 - **Duplicates** — size+name candidates; trash locked until SHA-256 verify; durable hash snapshot
 - **Local diagnostics** — privacy-preserving ring buffer with ANN candidate/fallback/latency metrics; header **Diagnostics** export (tokens and emails redacted)
@@ -172,7 +172,7 @@ Google Drive OAuth uses the public client configuration in `firebase-applet-conf
 - No full PDF/DOCX/OCR pipeline in browser yet (text extraction where Drive/export supports it)
 - Filtered type syncs use full list; incremental only for type = **all**
 - Broad `drive` OAuth scope; access token in `sessionStorage` (see [SECURITY.md](SECURITY.md))
-- List pagination capped (~20k) with truncation banner
+- Progressive chunked listing (pageSize 500) with live UI updates; safety ceiling only (~5M files) + truncation banner if hit
 - Missing size → **Size unknown** (never invented)
 
 ---

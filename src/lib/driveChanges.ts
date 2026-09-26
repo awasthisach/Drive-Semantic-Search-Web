@@ -94,7 +94,7 @@ export async function listAllDriveChanges(
   pageToken: string,
   corpus: DriveCorpus = 'user',
   driveId?: string,
-  maxPages: number = 20
+  maxPages: number = 500
 ): Promise<{ changes: DriveChangeItem[]; newPageToken: string }> {
   let token = pageToken;
   const all: DriveChangeItem[] = [];
