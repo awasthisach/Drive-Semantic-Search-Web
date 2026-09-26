@@ -96,14 +96,17 @@ export const DuplicateFinder: React.FC<DuplicateFinderProps> = ({ files, folders
   const selectSemanticGroup = (group: SemanticDuplicateGroup) => {
     setSelectedForMove(previous => {
       const next = new Set(previous);
-      group.files.forEach(file => next.add(file.id));
+      // Keep primary (oldest / index 0); select only the rest for move
+      group.files.slice(1).forEach(file => next.add(file.id));
       return next;
     });
   };
 
   const selectAllMoveCandidates = () => {
-    const ids = duplicateGroups.flatMap(group => group.files.map(file => file.id));
-    setSelectedForMove(new Set([...ids, ...semanticGroups.flatMap(group => group.files.map(file => file.id))]));
+    // Exclude primary (files[0]) so one original remains in place
+    const ids = duplicateGroups.flatMap(group => group.files.slice(1).map(file => file.id));
+    const semanticIds = semanticGroups.flatMap(group => group.files.slice(1).map(file => file.id));
+    setSelectedForMove(new Set([...ids, ...semanticIds]));
   };
 
   const toggleMoveChecked = (id: string) => toggleMove(id);
@@ -131,7 +134,10 @@ export const DuplicateFinder: React.FC<DuplicateFinderProps> = ({ files, folders
     setSelectedDuplicates(next);
   };
 
-  const handleDeselectAll = () => setSelectedDuplicates(new Set());
+  const handleDeselectAll = () => {
+    setSelectedDuplicates(new Set());
+    setSelectedForMove(new Set());
+  };
 
   const handleCleanSelected = () => {
     const safe = Array.from(selectedDuplicates).filter(id => confirmedIds.has(id));
@@ -190,7 +196,7 @@ export const DuplicateFinder: React.FC<DuplicateFinderProps> = ({ files, folders
             <div className="flex items-center gap-2 flex-wrap text-xs">
               <span className="font-semibold">{duplicateGroups.length} exact/candidate group(s)</span>
               <button type="button" onClick={selectAllMoveCandidates} className="text-blue-600 hover:underline font-medium">
-                Select all for move
+                Select non-primary for move
               </button>
               <button type="button" onClick={handleSelectAllDuplicates} className="text-indigo-600 hover:underline font-medium">
                 Select non-primary for trash
@@ -244,7 +250,7 @@ export const DuplicateFinder: React.FC<DuplicateFinderProps> = ({ files, folders
             {semanticStatus && <p className="text-[11px] text-zinc-600 dark:text-zinc-400" role="status">{semanticStatus}</p>}
             {semanticGroups.map((group, index) => (
               <div key={`${index}-${group.files.map(file => file.id).join('-')}`} className="rounded-xl border border-indigo-200/70 dark:border-indigo-900/60 bg-white/70 dark:bg-zinc-900/60 p-3">
-                <div className="flex items-center justify-between gap-2 mb-2"><span className="text-xs font-bold text-indigo-700 dark:text-indigo-300">Semantic similarity {Math.round(group.similarity * 100)}%</span><button type="button" onClick={() => selectSemanticGroup(group)} className="text-[11px] text-indigo-600 hover:underline">Select group for move</button></div>
+                <div className="flex items-center justify-between gap-2 mb-2"><span className="text-xs font-bold text-indigo-700 dark:text-indigo-300">Semantic similarity {Math.round(group.similarity * 100)}%</span><button type="button" onClick={() => selectSemanticGroup(group)} className="text-[11px] text-indigo-600 hover:underline">Select non-primary for move</button></div>
                 <div className="space-y-1">{group.files.map(file => <label key={file.id} className="flex items-center gap-2 text-xs"><input type="checkbox" checked={selectedForMove.has(file.id)} onChange={() => toggleMove(file.id)} /><span className="truncate">{file.name}</span></label>)}</div>
               </div>
             ))}
