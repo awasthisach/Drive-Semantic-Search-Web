@@ -1,5 +1,10 @@
 import type { DriveFile, FolderItem } from '../types';
-import { fetchGoogleDriveData, type DriveCorpus, type DriveFileTypeFilter } from './googleDriveService';
+import {
+  fetchGoogleDriveData,
+  type DriveCorpus,
+  type DriveFileTypeFilter,
+  type DriveFetchOnProgress,
+} from './googleDriveService';
 import { saveDriveMetaSnapshot, saveChangesPageToken, loadChangesPageToken, clearChangesPageToken } from './driveMetaStore';
 import { pruneMissingFromIndex, removeIndexedDocumentsByIds, makeCorpusKey } from './contentIndex';
 import { getChangesStartPageToken, listAllDriveChanges, applyDriveChanges } from './driveChanges';
@@ -11,8 +16,9 @@ export async function runDriveSync(opts: {
   driveId?: string;
   currentFiles: DriveFile[];
   currentFolders: FolderItem[];
+  onProgress?: DriveFetchOnProgress;
 }): Promise<{ files: DriveFile[]; folders: FolderItem[]; truncated: boolean; message: string; mode: 'full' | 'incremental' }> {
-  const { token, typeToUse, corpus, driveId, currentFiles, currentFolders } = opts;
+  const { token, typeToUse, corpus, driveId, currentFiles, currentFolders, onProgress } = opts;
   const cKey = makeCorpusKey(String(corpus), driveId);
 
   // Incremental only when filter is "all" and we already have a trusted complete baseline token
@@ -57,7 +63,15 @@ export async function runDriveSync(opts: {
     }
   }
 
-  const driveData = await fetchGoogleDriveData(token, typeToUse, 40, corpus, driveId);
+  // Progressive full list: no artificial page cap; streams batches via onProgress
+  const driveData = await fetchGoogleDriveData(
+    token,
+    typeToUse,
+    undefined,
+    corpus,
+    driveId,
+    onProgress
+  );
   const driveIds = new Set(driveData.files.map(f => f.id));
   const files = [
     ...driveData.files,
@@ -109,12 +123,22 @@ export async function runDriveSync(opts: {
     }
   }
 
-  const truncMsg = truncated ? ' (list capped — more files on Drive; index prune skipped)' : '';
+  const truncMsg = truncated
+    ? ' (safety ceiling hit — more files may exist; index prune skipped)'
+    : '';
   return {
     files,
     folders,
     truncated,
     mode: 'full',
-    message: 'Full sync (' + typeToUse + '): ' + driveData.files.length + ' files' + truncMsg,
+    message:
+      'Full sync (' +
+      typeToUse +
+      '): ' +
+      driveData.files.length +
+      ' files, ' +
+      driveData.pagesFetched +
+      ' pages' +
+      truncMsg,
   };
 }
