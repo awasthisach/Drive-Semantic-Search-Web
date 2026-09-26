@@ -13,7 +13,7 @@
     "test": "vitest run",
     "evaluate:relevance": "vitest run src/lib/__tests__/vectorIndex.relevance.test.ts --reporter=verbose",
     "test:watch": "vitest",
-    "test:idb": "vitest run src/lib/__tests__/contentIndex.integration.test.ts",
+    "test:idb": "vitest run src/lib/__tests__/contentIndex.test.ts",
     "check:bundle": "node scripts/check-bundle-size.mjs",
     "format:check": "node -e \"console.log('Prettier not required in CI; run npx prettier --write src if desired')\""
   },

@@ -2,9 +2,9 @@ name: Build and Deploy Drive Semantic Search
 
 on:
   push:
-    branches: ["main", "master"]
+    branches: ["main"]
   pull_request:
-    branches: ["main", "master"]
+    branches: ["main"]
   workflow_dispatch:
 
 permissions:
@@ -58,7 +58,7 @@ jobs:
         run: npm run check:bundle
 
       - name: Upload artifact
-        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
         uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3.0.1
         with:
           path: ./dist
@@ -84,7 +84,7 @@ jobs:
 
   deploy-worker:
     name: Deploy Worker v3 and verify live contract
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
     needs: [build, worker-check]
     runs-on: ubuntu-latest
     defaults:
@@ -102,33 +102,33 @@ jobs:
       - name: Install Worker dependencies
         run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Validate deployment configuration
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          FIREBASE_TEST_EMAIL: ${{ secrets.FIREBASE_TEST_EMAIL }}
+          FIREBASE_TEST_PASSWORD: ${{ secrets.FIREBASE_TEST_PASSWORD }}
         run: |
           test -s wrangler.toml
           test -s package-lock.json
           grep -q '^name = "drive-semantic-embed"' wrangler.toml
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          test -n "$FIREBASE_TEST_EMAIL"
+          test -n "$FIREBASE_TEST_PASSWORD"
       - name: Deploy Worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: |
-          test -n "$CLOUDFLARE_API_TOKEN"
-          test -n "$CLOUDFLARE_ACCOUNT_ID"
-          npm run deploy
-      - name: Verify live Worker configuration and auth gate
+        run: npm run deploy
+      - name: Verify authenticated Worker contract
         env:
           EMBED_ENDPOINT: ${{ secrets.VITE_EMBED_ENDPOINT || 'https://drive-semantic-embed.awasthi-sach.workers.dev' }}
           FIREBASE_TEST_EMAIL: ${{ secrets.FIREBASE_TEST_EMAIL }}
           FIREBASE_TEST_PASSWORD: ${{ secrets.FIREBASE_TEST_PASSWORD }}
-        run: |
-          if [ -n "$FIREBASE_TEST_EMAIL" ] && [ -n "$FIREBASE_TEST_PASSWORD" ]; then
-            node ../../scripts/verify-live-contract.mjs
-          else
-            echo "::warning::FIREBASE_TEST_EMAIL/FIREBASE_TEST_PASSWORD are not configured; running the public health/auth-gate contract only. Configure both secrets to enable authenticated embedding verification."
-            node ../../scripts/verify-live-contract.mjs --allow-unauthenticated
-          fi
+        run: node ../../scripts/verify-live-contract.mjs
 
   deploy-pages:
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -147,7 +147,7 @@ jobs:
 
   verify-pages:
     name: Verify live Pages application
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
     needs: [deploy-pages]
     runs-on: ubuntu-latest
     steps:

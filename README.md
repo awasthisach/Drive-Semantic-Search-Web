@@ -1,203 +1,180 @@
-# Drive Semantic Search
+# Drive Semantic Search Web
 
-Client-side Progressive Web App for Google Drive with **hybrid semantic search** (neural vector similarity + BM25 + metadata), offline pinning, encrypted vault, duplicate verification, and Drive management features.
+A client-side progressive web app for browsing Google Drive with hybrid search, offline pinning, duplicate review, and an encrypted notes vault.
 
-**Live:** https://awasthisach.github.io/Drive-Semantic-Search-Web/
+- **Live app:** <https://awasthisach.github.io/Drive-Semantic-Search-Web/>
+- **Embedding Worker:** <https://drive-semantic-embed.awasthi-sach.workers.dev>
+- **Security policy:** [SECURITY.md](SECURITY.md)
+- **Data-consistency audit and remediation record:** [DATA-CONSISTENCY-AUDIT.md](DATA-CONSISTENCY-AUDIT.md)
 
-**Embed Worker:** https://drive-semantic-embed.awasthi-sach.workers.dev
+> The app runs in the browser and calls Google Drive directly. Search indexes, pinned file bytes, and vault records are stored locally in browser IndexedDB; these stores have different protection properties. See [Privacy and security](#privacy-and-security).
 
-**Runtime rule:** Neural retrieval is used only when the authenticated embedding Worker is reachable and compatible vectors are indexed. Large corpora use ANN candidates followed by exact cosine reranking; if ANN returns no qualified hit, the search automatically performs an exact corpus scan before returning no neural result. If embeddings are unavailable, search remains usable through **BM25 + metadata** fallback.
+## What the app does
 
----
+- **Drive browsing and management:** My Drive, All drives, or a selected Shared Drive; file-type filters; folders; upload; move; star; and trash.
+- **Incremental synchronization:** full-list initialization followed by the Google Drive Changes API when the file-type filter is set to **All**. Change pagination is bounded; a capped/incomplete drain fails without advancing its checkpoint. See [Sync and consistency behavior](#sync-and-consistency-behavior).
+- **Hybrid search:** metadata, BM25 ranking over extracted text, and optional neural similarity. Search still works using metadata and BM25 when neural embeddings are not configured or available.
+- **Content indexing:** extracts supported text into local IndexedDB documents, chunks, and postings. Text is capped at 500,000 characters per file; the cap is recorded as truncation. Vector embeddings use 768 dimensions and are versioned separately.
+- **Offline pinning:** saves downloaded/exported bytes in a bounded local cache (nominal limits: 200 MB total and 80 files; the browser’s actual quota can be lower).
+- **Duplicate review:** groups either SHA-256-confirmed copies or weaker same-size/name candidates. Candidate groups cannot be trashed until verification. Hash verification is tied to the Drive file revision it checked.
+- **Semantic near-duplicate review:** groups similar file-level embedding centroids for human review and move actions. It never enables automatic trash.
+- **Encrypted vault:** protects stored vault entries with PBKDF2 key derivation and AES-GCM encryption. It does not encrypt the separate search indexes or offline cache.
+- **Device storage scanner:** user-selected phone/SD-card directory review where the browser supports the File System Access API. The app does not silently remove files.
+- **PWA shell:** installable web app with cached application assets and automatic updates.
+- **Local diagnostics:** a bounded privacy-oriented event buffer with token/email redaction on export.
 
-## Features
+## Search and indexing
 
-- **Google Drive** — OAuth (GIS/Firebase), My Drive / All drives / Shared Drive, type filters, upload, trash, move, folders, star
-- **Token lifecycle** — expiry, silent refresh, revoke on sign-out; `withDriveAuthRetry` on mutations
-- **Incremental sync** — Drive Changes API; full list seeds page token; delta Sync Now when type filter = all
-- **Hybrid search**
-  - **Metadata** — filename, summary, tags (exact name boost)
-  - **BM25 body** — IndexedDB postings over extracted Drive text
-  - **Neural (optional)** — Gemini Embedding 2 (768 dimensions, compatibility version 3) via authenticated Worker → cosine over chunk vectors → hybrid blend
-  - Highlight chips, match reasons, Star / Pin offline / Copy link on results
-  - Hindi/Hinglish query expansion (lightweight pairs; preserves Devanagari combining marks)
-- **Content + vector index** — IndexedDB BM25 docs/chunks/postings **and** separate vector store; versioned multi-probe LSH bucket index for large-corpus candidate retrieval; content-hash skip re-embed; cancel + progress; **resume cursor** (SHA-256 signature of corpus file list); idle ANN warm-up with Web Locks coordination across tabs
-- **Select all visible** — pagination-aware (current page only)
-- **Offline pin** — IndexedDB LRU + SHA-256; browser storage quota on offline tab
-- **Vault** — PBKDF2 310k + AES-GCM (Worker + main-thread fallback)
-- **Duplicates** — select duplicate/candidate files individually or in bulk; move selected files to Drive root or any folder; trash remains locked until SHA-256 verify; durable hash snapshot
-- **Semantic duplicate review** — after content embedding, compare file-level embedding centroids with a user-selected similarity threshold (85/90/95%); semantic matches are review-only and can be selected for move, never auto-trashed
-- **Local diagnostics** — privacy-preserving ring buffer with ANN candidate/fallback/latency metrics; header **Diagnostics** export (tokens and emails redacted)
-- **PWA** — Vite PWA shell, installable
+The search pipeline combines three signals:
 
----
+| Signal | Availability | Notes |
+|---|---|---|
+| Metadata | Always | Names, summaries, tags, and file metadata. |
+| BM25 body | After content indexing | Local IndexedDB postings over extracted text. |
+| Neural similarity | Optional | Firebase-authenticated browser request → Cloudflare Worker → Gemini embeddings → local vector search. Requires a configured/reachable Worker and compatible indexed vectors. |
 
-## Stack
+The hybrid weights in `src/lib/searchEngine.ts` are experimental/provisional, not calibrated on a representative production corpus. Treat search ranking as a useful retrieval aid, not a quality guarantee. Hindi/Hinglish query expansion is lightweight and rule-based; it is not a full translation system.
 
-React 19 · Vite 6 · Tailwind 4 · TypeScript strict · Firebase Auth + GIS · Drive API v3 · IndexedDB · Web Crypto · Vitest 5 · optional Cloudflare Worker (`workers/embed`)
+For larger vector collections, the app uses a versioned, rebuildable IndexedDB locality-sensitive hashing (LSH) candidate index and exact cosine reranking of those candidates. This is **approximate retrieval**: a non-empty ANN candidate set can omit a true nearest neighbor. An exact scan is used when the ANN path returns no qualified hit. The deterministic relevance fixture is a regression test, not evidence of production recall on real Drive files or Gemini embeddings.
 
----
+### Supported text extraction
 
-## Quick setup instructions
+Current extraction supports Google Docs (text export), Sheets (CSV export), Slides (text export), and text-like files such as TXT, CSV, Markdown, HTML, JSON, XML, and logs. It does not implement browser-side PDF/DOCX/XLSX/PPTX parsing or OCR. Google-native content is indexed from its text export representation; SHA verification hashes downloaded bytes or the corresponding Google export bytes, not an abstract native-document representation.
 
-### Normal development checkout
+## Sync and consistency behavior
 
-1. Install a current Node.js LTS release.
-2. Clone the repository and enter it.
-3. Run `npm ci`.
-4. Run `npm run dev` for local development.
-5. Before submitting changes, run `npm run lint`, `npm test`, and `npm run build`.
+- A complete **All files** listing captures its Changes API start token before enumeration, saves a complete snapshot, completes safe index pruning, and only then persists the token. Changes made while listing are therefore eligible for the next incremental drain.
+- An incremental run applies the change batch, removes deleted-file index data, persists the updated snapshot, and writes the new checkpoint last. If interrupted before checkpoint advancement, the old checkpoint causes safe replay rather than silently skipping that batch.
+- Change-page exhaustion without `newStartPageToken` is an explicit incomplete-sync error. The app does not advance the checkpoint or claim the capped result is current.
+- Incremental deletion and full-list pruning are corpus-aware. Pruning is skipped for filtered file types and incomplete/truncated full listings.
+- Replacing one BM25 document, its chunks, and postings is performed in a single IndexedDB read-write transaction. IndexedDB stores for BM25 content and vectors are separate, so no browser transaction can atomically commit across both; vector-cleanup failures are propagated rather than hidden, and retry/re-index is the repair path.
+- SHA-256 hashes are retained only with the `modifiedTime` of the revision whose bytes were verified. Hashing rechecks that revision, and a Drive edit invalidates the old verified state. A stale offline cache hash is not restored as verified for a different current Drive revision.
+- These protections are application-level crash/replay safeguards, not a substitute for backing up browser-local data. Clearing browser site data deletes the local indexes and offline cache.
 
-### Production neural-search setup
+## Privacy and security
 
-1. Deploy the Worker from `workers/embed`.
-2. Configure the Worker secret `GEMINI_API_KEY` and variable `FIREBASE_PROJECT_ID`.
-3. Keep `ALLOWED_ORIGIN` equal to the actual Pages origin.
-4. Deploy the SPA only after the Worker endpoint is reachable and authenticated requests return the expected embedding response.
-5. Sign in to the live app and run **Index extractable content** before testing neural search.
-6. Test both a semantic query and a normal filename/keyword query.
-7. Verify that an embedding failure still returns BM25 + metadata results.
-8. Open **Duplicates**, select one or more files, choose **Move selected**, and confirm a Drive folder.
-9. For semantic duplicate review, index extractable content first, then choose a similarity threshold and select **Find similar files**. Review the groups before moving anything.
+This is a browser application, not a hosted Drive data-processing backend. However, “client-side” does **not** mean every piece of data is encrypted or never leaves the browser:
 
-**Security rule:** every `VITE_*` value is public because it is bundled into the browser. Never put `GEMINI_API_KEY`, Cloudflare API tokens, Firebase private keys, service-account credentials, or OAuth client secrets in frontend environment variables or committed files.
+| Data | Where it is used/stored | Protection and caveat |
+|---|---|---|
+| Google Drive metadata/content | Requested directly from Google Drive in the browser | Drive OAuth uses the broad `drive` scope, including mutation privileges. Access tokens are held in `sessionStorage`; active-origin XSS can expose a token. |
+| Extracted search text | BM25 document/chunk/posting IndexedDB database | Stored locally in ordinary IndexedDB, not inside the encrypted vault. When neural embedding is enabled, text/chunks are sent to the configured Worker and its Gemini embedding provider. |
+| Vector records | Separate local IndexedDB vector database | Stores embeddings and corresponding chunk text. These records are not vault-encrypted. |
+| Offline-pinned files | Offline-cache IndexedDB database | Stores file bytes and metadata locally without vault encryption. Browser storage may be evicted or quota-limited. |
+| Vault entries | Vault-specific IndexedDB store | The stored payload is encrypted with AES-GCM; PBKDF2 derives the key. This is not protection against malicious JavaScript/XSS running on the same origin. |
+| Firebase web config and OAuth client ID | Public frontend config | Expected to be visible in the browser. Restrict the Firebase API key and OAuth client origins in Google Cloud/Firebase settings. |
+| Gemini API key and Cloudflare credentials | Server-side Worker / GitHub Actions secrets | Never place these values in `VITE_*`, frontend config, committed files, or a browser bundle. |
 
-**Verification rule:** a green GitHub Actions build proves the code/build pipeline passed; it does **not** by itself prove that Google OAuth, Drive access, the Cloudflare Worker, or live neural retrieval works. Those must be runtime-tested.
+See [SECURITY.md](SECURITY.md) for the repository’s security policy and reporting process. Avoid running the app in an untrusted browser profile or granting Drive access to a deployment origin you do not trust.
 
----
-## Scripts
+## Local development
+
+### Requirements
+
+- Node.js 22 (the CI workflows use Node 22)
+- npm 10-compatible package manager
+- A modern browser for OAuth and IndexedDB behavior
+
+### Start the app
 
 ```bash
+git clone https://github.com/awasthisach/Drive-Semantic-Search-Web.git
+cd Drive-Semantic-Search-Web
 npm ci
-npm run dev      # localhost:3000
-npm run lint     # tsc --noEmit
-npm test
-npm run evaluate:relevance  # deterministic ANN retrieval/relevance regression fixture
-npm run build
-npm run check:bundle
+npm run dev
 ```
 
-**CI:** `npm ci` → lint → placeholder guard → audit → test → build → bundle budget → GitHub Pages (push to `main`).
+Vite binds to `0.0.0.0:3000`; open <http://localhost:3000/>. The PWA service worker is disabled in development.
 
-### Local pre-push (optional)
+### Validate changes
 
 ```bash
-git config core.hooksPath .githooks
+npm run lint            # TypeScript check (tsc --noEmit)
+npm test                # Complete Vitest suite
+npm run test:idb        # IndexedDB content-index tests
+npm run evaluate:relevance  # Deterministic ANN regression/evaluation fixture
+npm run build           # Production Vite build
+npm run check:bundle    # Bundle-size budget check
 ```
 
-Runs `lint` + `test` + `build` before every push. Prefer branch protection requiring the Deploy workflow on `main`.
+The relevance command uses synthetic, deterministic vectors. It does not access user Drive data and is not a production semantic-search benchmark.
 
----
+## Authentication and app configuration
 
-## Search architecture
+Google sign-in and Drive access require the Firebase/Google Identity Services configuration used by `src/lib/firebaseAuth.ts` and `firebase-applet-config.json`.
 
+1. Configure Firebase Authentication and enable Google sign-in.
+2. Enable the Google Drive API for the corresponding Google Cloud project.
+3. Add the deployed origin and local development origin (`http://localhost:3000`) to the appropriate authorized JavaScript origins / OAuth settings.
+4. Restrict the Firebase web API key to the intended referrers and APIs.
+5. Sign in and grant the Drive permissions requested by the app.
+
+Frontend configuration is public by design. **Never** put `GEMINI_API_KEY`, a Cloudflare API token, service-account credentials, or other server-side secrets in `VITE_*` variables or committed files.
+
+## Optional neural-search Worker
+
+The optional Worker lives under `workers/embed` and proxies embedding requests to Gemini. Its contract includes authenticated requests and a versioned response compatible with the browser’s embedding configuration. Relevant settings are in `workers/embed/wrangler.toml`:
+
+- Worker name: `drive-semantic-embed`
+- Model: `gemini-embedding-2`
+- Dimension: `768`
+- Firebase project ID and allowed browser origin
+- Request-size, text-length, and per-isolate rate limits
+
+For local Worker validation:
+
+```bash
+cd workers/embed
+npm ci
+npm run check
 ```
-Google Drive
-     |
-     v
-Incremental extract / index
-     |
-     +--------------+--------------+
-     v              v              v
- Metadata      BM25 index     Vector index (768-d)
-     |              |              |
-     +--------------+--------------+
-                    v
-              Hybrid ranking
-     (provisional weights — see below)
+
+Configure `GEMINI_API_KEY` as a **Cloudflare Worker secret**, not a plain committed variable. Configure `FIREBASE_PROJECT_ID` and `ALLOWED_ORIGIN` for the intended app. The in-memory rate limiter is per Worker isolate; it is a best-effort guard, not a globally durable account quota.
+
+### Production deployment
+
+The consolidated workflow is `.github/workflows/deploy.yml`:
+
+- Pull requests targeting `main` run typecheck, placeholder guard, production dependency audit, tests, build, bundle check, and Worker dry run. They do not deploy.
+- A push to `main` runs those gates, deploys the Worker, requires a live authenticated Worker contract check, and deploys the Pages site only when the Worker job succeeds.
+- A manual `workflow_dispatch` from `main` can run the same deployment sequence. Starting it from another branch runs checks but does not deploy.
+- The authenticated contract check requires the CI secrets `FIREBASE_TEST_EMAIL` and `FIREBASE_TEST_PASSWORD`, in addition to `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`. Use a dedicated low-privilege Firebase test account. Missing required credentials fail the deployment gate rather than silently downgrading to an unauthenticated-only test.
+- `VITE_EMBED_ENDPOINT` is optional public configuration; if unset, the workflow uses the documented public Worker URL. It is not a secret.
+- GitHub Pages production deployment is restricted to `main`. Repository branch protection and required status-check settings must still be configured in GitHub repository settings.
+
+`.github/workflows/verify-lockfile.yml` is a read-only lockfile consistency check. It does not push commits into a protected branch; update `package-lock.json` with dependency changes and commit it with `package.json`.
+
+After deployment, verify actual OAuth sign-in, Drive listing, content indexing, a semantic search, BM25/metadata fallback, and duplicate review in the live browser. Green CI proves only the checks described above; it cannot certify every real user account, Drive corpus, browser quota, or search ranking.
+
+## Duplicate behavior
+
+- **SHA-256 group:** files whose verified bytes or exported bytes have matching SHA-256 are marked `verification: 'sha256'`. Hashing is sequential and may take time for many large candidates; failed verification does not certify a file.
+- **Candidate group:** same size and normalized name is only a review candidate. It is not proof of identical contents, and the UI keeps trash locked until SHA verification.
+- **Semantic group:** files are grouped through threshold-passing centroid-similarity links. This connected-group behavior can include members that are not directly above threshold with every other member. The displayed percentage is the **best direct pair** in the group, not a pairwise guarantee. Semantic groups are review/move-only; they do not authorize trash.
+
+## Repository layout
+
+```text
+src/components/       React screens and dialogs
+src/hooks/            App state and Drive action hooks
+src/lib/              Drive APIs, sync, extraction, indexes, search, crypto
+src/lib/embeddings/   Embedding client, config, and vector math
+src/lib/__tests__/    Vitest unit and IndexedDB regression tests
+workers/embed/        Cloudflare Worker embedding proxy
+scripts/              Build-size and live-contract validation tools
+.github/workflows/    Main deployment and lockfile-consistency workflows
 ```
 
-| Signal | When active |
-|--------|-------------|
-| Metadata | Always |
-| BM25 body | After “Index extractable content” |
-| Neural cosine | Worker reachable **and** vectors stored during index; exact scan for ≤128 vectors, IndexedDB LSH candidates above that, exact fallback when ANN has no qualified hit |
+## Current limitations
 
-**Provisional hybrid weights** (code: `HYBRID_WEIGHTS` in `src/lib/searchEngine.ts`):
+- No full PDF/Office parsing or OCR pipeline in the browser.
+- Neural ranking weights and ANN recall are not validated on a representative production Drive corpus.
+- Semantic similarity is a review signal, not proof of identical files or a safe-delete decision.
+- Export-based hashes for native Google files identify the downloaded export bytes; different export representations can affect matching.
+- Browser-local IndexedDB can be cleared, evicted, or run out of quota; local data is not backed up by this repository.
+- The app’s broad Drive OAuth scope, token storage, plaintext local search/offline stores, and XSS threat model are described in [SECURITY.md](SECURITY.md).
+- The Worker’s in-memory rate limiter is isolate-local and not a global quota system.
 
-| Component | Weight |
-|-----------|--------|
-| Neural | 0.55 |
-| BM25 | 0.25 |
-| Metadata | 0.20 |
+## Technology
 
-These are **not** eval-validated on a representative real Drive/Gemini corpus. Treat them as provisional until live ranking evaluation is performed.
-
-If the embed pipeline fails or is not configured, search **falls back** to BM25 + metadata (does not hard-fail). If a stale PWA deployment references a removed lazy chunk, the app performs at most one guarded reload per minute to recover the current asset manifest.
-
----
-
-## Enable neural search (ops)
-
-Production Worker URL (public, not a secret):
-
-`https://drive-semantic-embed.awasthi-sach.workers.dev`
-
-The SPA defaults to this URL. CI uses repository secret `VITE_EMBED_ENDPOINT` when set, otherwise the same default. `VITE_EMBED_ENDPOINT` is public configuration, not a credential.
-
-Worker must run **`workers/embed/src/index.ts`** (JSON `{ embeddings, model, version, dimension }`, with version `3`). A dashboard stub that returns plain `Unauthorized` will not work. Worker deployment is controlled by `.github/workflows/deploy-worker.yml` and requires `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` GitHub secrets.
-
-Required Worker secrets/vars:
-
-- Secret `GEMINI_API_KEY`
-- Variable or secret `FIREBASE_PROJECT_ID=thevvforg`
-- CORS origin default: `https://awasthisach.github.io`
-- Model `gemini-embedding-2`, dimension `768`, embedding compatibility version `3`
-
-After Worker + Pages are aligned:
-
-1. Sign in on the live app
-2. **Index extractable content** (writes BM25 + vectors)
-3. Query cross-language cases (e.g. `बेरोजगारी` vs English “employment / joblessness” docs)
-4. Confirm exact filename still ranks; embed downtime still returns BM25 results
-
-**Live multilingual proof cannot be claimed from unit tests alone.**
-
-### Secrets and deployment checklist
-
-The web app itself does **not** require a secret in `.env`: `VITE_EMBED_ENDPOINT` is a public Worker URL, and every `VITE_*` value is bundled into the browser. Do not put a Gemini key, Cloudflare token, Firebase private key, or OAuth client secret there.
-
-1. Create or select a Gemini API key in [Google AI Studio](https://aistudio.google.com/app/apikey). Keep the key server-side only.
-2. In [Cloudflare Workers & Pages](https://dash.cloudflare.com/?to=/:account/workers), open the `drive-semantic-embed` Worker → **Settings** → **Variables and Secrets** → **Add** → **Encrypt**, and set `GEMINI_API_KEY` to that key. Set `FIREBASE_PROJECT_ID` to the Firebase project ID as a plain Worker variable.
-3. For CI deployment, open the repository’s [GitHub Actions secrets page](https://github.com/awasthisach/Drive-Semantic-Search-Web/settings/secrets/actions) and add `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`. Add `FIREBASE_TEST_EMAIL` and `FIREBASE_TEST_PASSWORD` for the authenticated Worker contract gate. Create a dedicated low-privilege Firebase test user; these are CI-only credentials.
-4. Keep `ALLOWED_ORIGIN` equal to the deployed Pages origin (default: `https://awasthisach.github.io`). If you deploy under a different domain, update this Worker variable before deploying the SPA.
-5. Deploy the Worker first (`cd workers/embed && npm ci && npm run check && npm run deploy`), then deploy the SPA. Sign in, index extractable content, and run a search to verify the authenticated embed path.
-
-Google Drive OAuth uses the public client configuration in `firebase-applet-config.json`; configure its authorized JavaScript origins and redirect domains in the [Google Cloud Credentials console](https://console.cloud.google.com/apis/credentials) and Firebase Authentication console. These client IDs are intentionally public and are not repository secrets.
-
----
-
-## Honest limits
-
-- Hybrid weights are **provisional** until eval on real Gemini embeddings
-- Large-corpus vector search uses a versioned IndexedDB multi-probe LSH index and exact cosine re-ranking of candidates; first use backfills the derived index with a streaming cursor. If the ANN candidate set is empty or produces no qualified hit, an exact corpus scan is used as a correctness fallback.
-- ANN relevance is regression-tested on a deterministic, labeled fixture, not on real user Drive data; do not interpret the fixture as proof of production semantic quality or use it to tune hybrid weights
-- No full PDF/DOCX/OCR pipeline in browser yet (text extraction where Drive/export supports it)
-- Semantic duplicate groups use the centroid of indexed chunk embeddings. They are similarity candidates, not proof of byte-identical files; exact duplicate trash requires SHA-256 verification.
-- Filtered type syncs use full list; incremental only for type = **all**
-- Broad `drive` OAuth scope; access token in `sessionStorage` (see [SECURITY.md](SECURITY.md))
-- Progressive chunked listing (pageSize 500) with live UI updates; safety ceiling only (~5M files) + truncation banner if hit
-- Missing size → **Size unknown** (never invented)
-
----
-
-## Resilience
-
-- `fetchWithBackoff` on Drive list + mutations (429/403, Retry-After, jitter)
-- Offline pin cancellable via `AbortController`
-- Content-index prune is corpus-scoped and skipped when list is truncated
-- Race-free durable meta + hash snapshot persist
-- Embed API failure keeps prior valid vectors; search falls back without neural
-- Version-1 and version-2 vectors are incompatible and are migrated only after successful version-3 re-embedding
-
----
-
-## Security
-
-- **Never** put `GEMINI_API_KEY` in `VITE_*` or the SPA bundle
-- Browser sends Firebase **ID token** only to the Worker
-- See [SECURITY.md](SECURITY.md). Report vulnerabilities via private GitHub advisory.
-
-
-### Safe Android storage cleaner
-The Storage tab uses the browser File System Access API only after the user explicitly selects a phone-storage or SD-card directory. It never deletes automatically: moving duplicates requires a second confirmation, copies the file first, and removes the source only after a successful copy. Deletion is a separate explicit confirmation action.
+React 19 · TypeScript · Vite 6 · Tailwind CSS 4 · Firebase Authentication / Google Identity Services · Google Drive API v3 · IndexedDB · Web Crypto · Vitest · optional Cloudflare Workers and Gemini embeddings.

@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import * as contentIndex from '../contentIndex';
-import { buildEmbeddingChunks, chunkText, tokenize, searchContentIndex } from '../contentIndex';
+import {
+  buildEmbeddingChunks, chunkText, tokenize, searchContentIndex,
+  putIndexedDocument, getIndexedDocument, countIndexedDocuments, removeIndexedDocumentsByIds,
+} from '../contentIndex';
 
 describe('chunkText', () => {
   it('returns empty for blank', () => {
@@ -53,5 +56,21 @@ describe('legacy removal guard', () => {
   it('returns empty map when no postings are available', async () => {
     const res = await searchContentIndex('alpha beta gamma');
     expect(res.size).toBe(0);
+  });
+});
+
+describe('durable content index mutations', () => {
+  it('replaces documents and postings without retaining stale terms', async () => {
+    await putIndexedDocument({ id: 'replace-test', name: 'Old', mimeType: 'text/plain', text: 'alpha oldtoken', source: 'binary-text', corpusKey: 'test' });
+    await putIndexedDocument({ id: 'replace-test', name: 'New', mimeType: 'text/plain', text: 'bravo newtoken', source: 'binary-text', corpusKey: 'test' });
+
+    expect((await getIndexedDocument('replace-test'))?.name).toBe('New');
+    expect(await countIndexedDocuments('test')).toBe(1);
+    expect((await searchContentIndex('oldtoken', 'test')).has('replace-test')).toBe(false);
+    expect((await searchContentIndex('newtoken', 'test')).has('replace-test')).toBe(true);
+
+    expect(await removeIndexedDocumentsByIds(['replace-test'])).toBe(1);
+    expect(await getIndexedDocument('replace-test')).toBeNull();
+    expect((await searchContentIndex('newtoken', 'test')).has('replace-test')).toBe(false);
   });
 });

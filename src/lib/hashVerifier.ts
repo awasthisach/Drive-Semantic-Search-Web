@@ -4,7 +4,7 @@
  */
 
 import { downloadDriveFileBytes, sha256Blob } from './offlineCache';
-import { sleep } from './rateLimit';
+import { fetchWithBackoff, sleep } from './rateLimit';
 import type { DriveFile } from '../types';
 
 export type HashProgress = {
@@ -17,10 +17,20 @@ export type HashProgress = {
 export async function hashDriveFile(
   accessToken: string,
   file: DriveFile
-): Promise<{ sha256: string; size: number }> {
+): Promise<{ sha256: string; size: number; modifiedTime: string }> {
   const { blob } = await downloadDriveFileBytes(accessToken, file.id, file.mimeType);
   const sha = await sha256Blob(blob);
-  return { sha256: sha, size: blob.size };
+  const response = await fetchWithBackoff(
+    `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(file.id)}?fields=modifiedTime&supportsAllDrives=true`,
+    { headers: { Authorization: 'Bearer ' + accessToken, Accept: 'application/json' } },
+    { label: 'hash-verification-revision', maxRetries: 3, baseMs: 400 }
+  );
+  if (!response.ok) throw new Error('Could not validate file revision after hashing: ' + response.status);
+  const metadata = await response.json();
+  if (!file.modifiedTime || metadata.modifiedTime !== file.modifiedTime) {
+    throw new Error('File changed during SHA-256 verification; sync and retry');
+  }
+  return { sha256: sha, size: blob.size, modifiedTime: metadata.modifiedTime };
 }
 
 export async function verifyFilesHashQueue(
@@ -28,7 +38,7 @@ export async function verifyFilesHashQueue(
   files: DriveFile[],
   opts: {
     onProgress?: (p: HashProgress) => void;
-    onHashed?: (fileId: string, contentHash: string, size: number) => void;
+    onHashed?: (fileId: string, contentHash: string, size: number, modifiedTime: string) => void;
     shouldCancel?: () => boolean;
   } = {}
 ): Promise<{ ok: number; failed: number }> {
@@ -41,8 +51,8 @@ export async function verifyFilesHashQueue(
     if (opts.shouldCancel?.()) break;
     opts.onProgress?.({ done, total: list.length, currentName: file.name });
     try {
-      const { sha256, size } = await hashDriveFile(accessToken, file);
-      opts.onHashed?.(file.id, 'sha256:' + sha256, size);
+      const { sha256, size, modifiedTime } = await hashDriveFile(accessToken, file);
+      opts.onHashed?.(file.id, 'sha256:' + sha256, size, modifiedTime);
       ok++;
       await sleep(120);
     } catch (e: any) {

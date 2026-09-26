@@ -111,6 +111,18 @@ export function isDocumentStale(
   return existing.driveModifiedTime !== driveModifiedTime;
 }
 
+function deleteRowsForFile(tx: IDBTransaction, id: string): void {
+  for (const storeName of [CHUNK_STORE, POSTING_STORE]) {
+    const cursorRequest = tx.objectStore(storeName).index('fileId').openCursor(IDBKeyRange.only(id));
+    cursorRequest.onsuccess = () => {
+      const cursor = cursorRequest.result;
+      if (!cursor) return;
+      cursor.delete();
+      cursor.continue();
+    };
+  }
+}
+
 export async function putIndexedDocument(doc: {
   id: string;
   name: string;
@@ -136,14 +148,13 @@ export async function putIndexedDocument(doc: {
     corpusKey: doc.corpusKey,
   };
   const db = await openDb();
-  await removeIndexedDocument(doc.id);
-  return new Promise((resolve, reject) => {
+  // Vector storage is a separate database. Remove the old derived vectors first;
+  // if that fails, keep the old text index rather than pairing new text with stale vectors.
+  await removeVectorsForFile(doc.id);
+  await new Promise<void>((resolve, reject) => {
     const tx = db.transaction([DOC_STORE, CHUNK_STORE, POSTING_STORE], 'readwrite');
-    tx.objectStore(DOC_STORE).put(indexed);
     const termBest = new Map<string, { tf: number; chunkIdx: number }>();
     chunks.forEach((ch, idx) => {
-      const chunkId = doc.id + '#' + idx;
-      tx.objectStore(CHUNK_STORE).put({ id: chunkId, fileId: doc.id, idx, text: ch });
       const terms = tokenize(ch);
       const tf = new Map<string, number>();
       for (const term of terms) tf.set(term, (tf.get(term) || 0) + 1);
@@ -152,43 +163,61 @@ export async function putIndexedDocument(doc: {
         if (!prev || count > prev.tf) termBest.set(term, { tf: count, chunkIdx: idx });
       }
     });
-    for (const [term, info] of termBest) {
-      tx.objectStore(POSTING_STORE).put({
-        id: term + '|' + doc.id,
-        term,
-        fileId: doc.id,
-        tf: info.tf,
-        bestChunkIdx: info.chunkIdx,
+    const chunkKeys: IDBValidKey[] = [];
+    const postingKeys: IDBValidKey[] = [];
+    let cursorsRemaining = 2;
+    const writeReplacement = () => {
+      cursorsRemaining--;
+      if (cursorsRemaining !== 0) return;
+      for (const key of chunkKeys) tx.objectStore(CHUNK_STORE).delete(key);
+      for (const key of postingKeys) tx.objectStore(POSTING_STORE).delete(key);
+      tx.objectStore(DOC_STORE).put(indexed);
+      chunks.forEach((ch, idx) => {
+        tx.objectStore(CHUNK_STORE).put({ id: doc.id + '#' + idx, fileId: doc.id, idx, text: ch });
       });
-    }
+      for (const [term, info] of termBest) {
+        tx.objectStore(POSTING_STORE).put({
+          id: term + '|' + doc.id,
+          term,
+          fileId: doc.id,
+          tf: info.tf,
+          bestChunkIdx: info.chunkIdx,
+        });
+      }
+    };
+    const chunkCursor = tx.objectStore(CHUNK_STORE).index('fileId').openCursor(IDBKeyRange.only(doc.id));
+    chunkCursor.onsuccess = () => {
+      const cursor = chunkCursor.result;
+      if (!cursor) { writeReplacement(); return; }
+      chunkKeys.push(cursor.primaryKey);
+      cursor.continue();
+    };
+    const postingCursor = tx.objectStore(POSTING_STORE).index('fileId').openCursor(IDBKeyRange.only(doc.id));
+    postingCursor.onsuccess = () => {
+      const cursor = postingCursor.result;
+      if (!cursor) { writeReplacement(); return; }
+      postingKeys.push(cursor.primaryKey);
+      cursor.continue();
+    };
     tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
+    tx.onerror = () => reject(tx.error || new Error('content index replacement failed'));
+    tx.onabort = () => reject(tx.error || new Error('content index replacement aborted'));
   });
 }
 
 export async function removeIndexedDocument(id: string): Promise<void> {
-  try {
-    const db = await openDb();
-    const chunks = await getChunksForFile(id);
-    await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction([DOC_STORE, CHUNK_STORE, POSTING_STORE], 'readwrite');
-      tx.objectStore(DOC_STORE).delete(id);
-      for (const c of chunks) tx.objectStore(CHUNK_STORE).delete(c.id);
-      const postingsReq = tx.objectStore(POSTING_STORE).index('fileId').getAllKeys(id);
-      postingsReq.onsuccess = () => {
-        for (const key of postingsReq.result || []) tx.objectStore(POSTING_STORE).delete(key);
-      };
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
-  } catch (e) {
-    console.warn('[contentIndex] remove failed', id, e);
-  }
-  try {
-    await removeVectorsForFile(id);
-  } catch {
-    /* ignore */
-  }
+  // Delete derived vectors first so an IndexedDB text-store failure cannot leave
+  // old semantic matches active for a document the caller believes was removed.
+  await removeVectorsForFile(id);
+  const db = await openDb();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction([DOC_STORE, CHUNK_STORE, POSTING_STORE], 'readwrite');
+    tx.objectStore(DOC_STORE).delete(id);
+    deleteRowsForFile(tx, id);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error || new Error('content index removal failed'));
+    tx.onabort = () => reject(tx.error || new Error('content index removal aborted'));
+  });
 }
 
 export type PruneOptions = {

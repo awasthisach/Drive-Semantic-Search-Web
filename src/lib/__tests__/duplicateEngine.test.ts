@@ -30,16 +30,29 @@ describe('findDuplicates', () => {
     const groups = findDuplicates(files);
     expect(groups.length).toBe(1);
     expect(groups[0].fileCount).toBe(2);
+    expect(groups[0].verification).toBe('candidate');
   });
 
   it('prefers sha256 groups', () => {
     const files = [
-      makeFile({ id: '1', name: 'x.pdf', contentHash: 'sha256:abc' }),
-      makeFile({ id: '2', name: 'y.pdf', contentHash: 'sha256:abc' }),
+      makeFile({ id: '1', name: 'x.pdf', contentHash: 'sha256:abc', contentHashModifiedTime: '2024-01-01T00:00:00.000Z' }),
+      makeFile({ id: '2', name: 'y.pdf', contentHash: 'sha256:abc', contentHashModifiedTime: '2024-01-01T00:00:00.000Z' }),
     ];
     const groups = findDuplicates(files);
     expect(groups.length).toBe(1);
     expect(groups[0].hash.startsWith('sha256:')).toBe(true);
+    expect(groups[0].verification).toBe('sha256');
+  });
+
+  it('downgrades legacy or revision-mismatched SHA values to candidates', () => {
+    const files = [
+      makeFile({ id: '1', name: 'same.pdf', contentHash: 'sha256:old', contentHashModifiedTime: '2023-01-01T00:00:00.000Z' }),
+      makeFile({ id: '2', name: 'same.pdf', contentHash: 'sha256:old', contentHashModifiedTime: '2023-01-01T00:00:00.000Z' }),
+    ];
+    const groups = findDuplicates(files);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].verification).toBe('candidate');
+    expect(groups[0].hash).not.toBe('sha256:old');
   });
 
   it('returns empty when all unique', () => {
@@ -75,6 +88,6 @@ describe('findDuplicates', () => {
     ], 0.9);
     expect(groups).toHaveLength(1);
     expect(groups[0].files.map(file => file.id)).toEqual(['1', '2']);
-    expect(groups[0].similarity).toBeGreaterThan(0.9);
+    expect(groups[0].bestPairSimilarity).toBeGreaterThan(0.9);
   });
 });

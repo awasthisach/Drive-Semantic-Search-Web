@@ -98,7 +98,7 @@ export async function listAllDriveChanges(
 ): Promise<{ changes: DriveChangeItem[]; newPageToken: string }> {
   let token = pageToken;
   const all: DriveChangeItem[] = [];
-  let newPageToken = pageToken;
+  let newPageToken: string | undefined;
   for (let i = 0; i < maxPages; i++) {
     const page = await listDriveChangesPage(accessToken, token, corpus, driveId);
     all.push(...page.changes);
@@ -111,6 +111,9 @@ export async function listAllDriveChanges(
       continue;
     }
     break;
+  }
+  if (!newPageToken) {
+    throw new Error(`Changes API pagination incomplete after ${maxPages} pages; checkpoint was not advanced`);
   }
   return { changes: all, newPageToken };
 }
@@ -218,9 +221,14 @@ export function applyDriveChanges(
       const prev = fileMap.get(mapped.file.id);
       if (prev) {
         mapped.file.isOffline = prev.isOffline;
-        mapped.file.contentHash = prev.contentHash?.startsWith('sha256:')
-          ? prev.contentHash
-          : mapped.file.contentHash;
+        if (
+          prev.contentHash?.startsWith('sha256:') &&
+          prev.contentHashModifiedTime === prev.modifiedTime &&
+          prev.modifiedTime === mapped.file.modifiedTime
+        ) {
+          mapped.file.contentHash = prev.contentHash;
+          mapped.file.contentHashModifiedTime = prev.contentHashModifiedTime;
+        }
       }
       fileMap.set(mapped.file.id, mapped.file);
     }

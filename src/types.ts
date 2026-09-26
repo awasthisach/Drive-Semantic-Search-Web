@@ -26,6 +26,8 @@ export interface DriveFile {
   isOffline: boolean;
   isEncrypted: boolean;
   contentHash: string;
+  /** Drive modifiedTime of the exact revision whose bytes produced a sha256: hash. */
+  contentHashModifiedTime?: string;
   tags: string[];
   semanticSummary: string;
   starred?: boolean;
@@ -47,6 +49,7 @@ export interface VaultFile {
 
 export interface DuplicateGroup {
   hash: string;
+  verification: 'sha256' | 'candidate';
   fileCount: number;
   totalSize: number;
   reclaimableSize: number;
