@@ -31,14 +31,27 @@ export function applyOfflineMetaToDriveFiles(files: DriveFile[], metas: OfflineB
     if (!meta) return file;
     const revisionMatches = Boolean(meta.driveModifiedTime && meta.driveModifiedTime === file.modifiedTime);
     const verifiedHash = meta.sha256 && revisionMatches ? 'sha256:' + meta.sha256 : undefined;
+    const fileHashIsCurrent = Boolean(
+      file.contentHash.startsWith('sha256:') &&
+      file.contentHashModifiedTime &&
+      file.contentHashModifiedTime === file.modifiedTime,
+    );
     const contentHash = verifiedHash || (
-      file.contentHash.startsWith('sha256:') ? `gdrive-${file.id}-${file.size}` : file.contentHash
+      fileHashIsCurrent
+        ? file.contentHash
+        : file.contentHash.startsWith('sha256:')
+          ? `gdrive-${file.id}-${file.size}`
+          : file.contentHash
     );
     return {
       ...file,
       isOffline: true,
       contentHash,
-      contentHashModifiedTime: verifiedHash ? meta.driveModifiedTime : undefined,
+      contentHashModifiedTime: verifiedHash
+        ? meta.driveModifiedTime
+        : fileHashIsCurrent
+          ? file.contentHashModifiedTime
+          : undefined,
     };
   });
 }

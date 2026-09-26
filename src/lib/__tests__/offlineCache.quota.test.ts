@@ -73,4 +73,18 @@ describe('offline SHA revision restoration', () => {
     expect(restored.contentHash).toBe('gdrive-cached');
     expect(restored.contentHashModifiedTime).toBeUndefined();
   });
+
+  it('preserves a valid current-revision hash when offline metadata is stale', () => {
+    const file = makeFile({
+      id: 'cached', name: 'cached.txt', modifiedTime: '2026-01-01T00:00:00.000Z',
+      contentHash: 'sha256:current', contentHashModifiedTime: '2026-01-01T00:00:00.000Z',
+    });
+    const meta = {
+      id: 'cached', name: 'cached.txt', mimeType: 'text/plain', size: 5, cachedAt: '2026-02-01',
+      sha256: 'old-hash', driveModifiedTime: '2025-12-01T00:00:00.000Z',
+    };
+    const [restored] = applyOfflineMetaToDriveFiles([file], [meta]);
+    expect(restored.contentHash).toBe('sha256:current');
+    expect(restored.contentHashModifiedTime).toBe(file.modifiedTime);
+  });
 });
