@@ -9,7 +9,7 @@ import {
   SharedDriveInfo,
 } from '../lib/googleDriveService';
 import { loadVaultFiles } from '../lib/vaultStore';
-import { listOfflineMeta } from '../lib/offlineCache';
+import { applyOfflineMetaToDriveFiles, listOfflineMeta } from '../lib/offlineCache';
 import { loadDriveMetaSnapshot } from '../lib/driveMetaStore';
 import { runDriveSync } from '../lib/syncDrive';
 
@@ -96,12 +96,7 @@ export function useDriveAppState() {
       try {
         const metas = await listOfflineMeta();
         if (cancelled || !metas.length) return;
-        const offlineIds = new Set(metas.map(m => m.id));
-        const hashById = new Map(metas.filter(m => m.sha256).map(m => [m.id, 'sha256:' + m.sha256!]));
-        setFiles(prev => prev.map(f => {
-          if (!offlineIds.has(f.id)) return f;
-          return { ...f, isOffline: true, contentHash: hashById.get(f.id) || f.contentHash };
-        }));
+        setFiles(prev => applyOfflineMetaToDriveFiles(prev, metas));
       } catch (e) {
         console.warn('Offline restore skipped:', e);
       }

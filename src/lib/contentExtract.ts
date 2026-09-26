@@ -18,6 +18,7 @@ const TEXTISH = [
 export interface ExtractResult {
   text: string;
   source: 'export' | 'binary-text';
+  truncated: boolean;
   note?: string;
 }
 
@@ -33,20 +34,25 @@ export function canExtractText(mimeType: string, name: string): boolean {
 }
 
 /** Read response body but stop after maxChars to limit JS heap pressure. */
-async function readTextCapped(res: Response, maxChars: number = MAX_INDEX_CHARS): Promise<string> {
+async function readTextCapped(
+  res: Response,
+  maxChars: number = MAX_INDEX_CHARS
+): Promise<{ text: string; truncated: boolean }> {
   const reader = res.body?.getReader();
   if (!reader) {
-    const t = await res.text();
-    return t.slice(0, maxChars);
+    const text = await res.text();
+    return { text: text.slice(0, maxChars), truncated: text.length > maxChars };
   }
   const decoder = new TextDecoder();
-  let out = '';
-  while (out.length < maxChars) {
+  let text = '';
+  let truncated = false;
+  while (text.length < maxChars) {
     const { done, value } = await reader.read();
     if (done) break;
-    out += decoder.decode(value, { stream: true });
-    if (out.length >= maxChars) {
-      out = out.slice(0, maxChars);
+    text += decoder.decode(value, { stream: true });
+    if (text.length >= maxChars) {
+      text = text.slice(0, maxChars);
+      truncated = true;
       try {
         await reader.cancel();
       } catch {
@@ -55,14 +61,10 @@ async function readTextCapped(res: Response, maxChars: number = MAX_INDEX_CHARS)
       break;
     }
   }
-  return out;
+  return { text, truncated };
 }
 
-async function driveFetch(
-  url: string,
-  accessToken: string,
-  label: string
-): Promise<Response> {
+async function driveFetch(url: string, accessToken: string, label: string): Promise<Response> {
   return fetchWithBackoff(
     url,
     { headers: { Authorization: 'Bearer ' + accessToken } },
@@ -85,7 +87,7 @@ export async function extractDriveFileText(
       'doc-export'
     );
     if (!res.ok) throw new Error('Doc export failed: ' + res.status);
-    return { text: await readTextCapped(res), source: 'export' };
+    return { ...(await readTextCapped(res)), source: 'export' };
   }
 
   if (m === 'application/vnd.google-apps.spreadsheet') {
@@ -95,7 +97,7 @@ export async function extractDriveFileText(
       'sheet-export'
     );
     if (!res.ok) throw new Error('Sheet export failed: ' + res.status);
-    return { text: await readTextCapped(res), source: 'export' };
+    return { ...(await readTextCapped(res)), source: 'export' };
   }
 
   if (m === 'application/vnd.google-apps.presentation') {
@@ -105,7 +107,7 @@ export async function extractDriveFileText(
       'slides-export'
     );
     if (!res.ok) throw new Error('Slides export failed: ' + res.status);
-    return { text: await readTextCapped(res), source: 'export', note: 'Slides text export' };
+    return { ...(await readTextCapped(res)), source: 'export', note: 'Slides text export' };
   }
 
   if (m.startsWith('text/') || TEXTISH.includes(m) || /\.(txt|md|csv|json|xml|html|log)$/i.test(name || '')) {
@@ -115,7 +117,7 @@ export async function extractDriveFileText(
       'binary-text'
     );
     if (!res.ok) throw new Error('Media download failed: ' + res.status);
-    return { text: await readTextCapped(res), source: 'binary-text' };
+    return { ...(await readTextCapped(res)), source: 'binary-text' };
   }
 
   throw new Error('Unsupported mime for text extract: ' + m);

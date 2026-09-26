@@ -257,9 +257,8 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
           continue;
         }
         setIndexProgress(`Indexing ${i + 1}/${extractable.length} (${pct}%): ${f.name}`);
-        const { text, source } = await extractDriveFileText(token, f.id, f.mimeType, f.name);
+        const { text, source, truncated: textWasTruncated } = await extractDriveFileText(token, f.id, f.mimeType, f.name);
         if (text && text.trim().length > 0) {
-          const wasTrunc = text.length > MAX_INDEX_CHARS;
           await putIndexedDocument({
             id: f.id,
             name: f.name,
@@ -267,7 +266,7 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
             text: text.slice(0, MAX_INDEX_CHARS),
             source,
             driveModifiedTime: f.modifiedTime,
-            textTruncated: wasTrunc,
+            textTruncated: textWasTruncated,
             corpusKey,
           });
           if (embeddingProvider) {
@@ -287,7 +286,7 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
             }
           }
           ok++;
-          if (wasTrunc) truncated++;
+          if (textWasTruncated) truncated++;
           writeCursor(sig, i + 1);
         } else {
           fail++;

@@ -28,16 +28,17 @@ export async function runDriveSync(opts: {
       if (pageToken) {
         const { changes, newPageToken } = await listAllDriveChanges(token, pageToken, corpus, driveId);
         const r = applyDriveChanges(currentFiles, currentFolders, changes);
-        await saveChangesPageToken(String(corpus), driveId, newPageToken);
+        // Finish side effects before advancing the checkpoint. If interrupted
+        // before the token write, replaying this batch is safe and completes cleanup.
+        if (r.removedIds.length > 0) {
+          await removeIndexedDocumentsByIds(r.removedIds);
+        }
         await saveDriveMetaSnapshot(r.files, r.folders, {
           corpus: String(corpus),
           sharedDriveId: driveId,
           truncated: false,
         });
-        // Only remove index rows for files Changes API marked deleted/trashed — never global prune here
-        if (r.removedIds.length > 0) {
-          await removeIndexedDocumentsByIds(r.removedIds);
-        }
+        await saveChangesPageToken(String(corpus), driveId, newPageToken);
         return {
           files: r.files,
           folders: r.folders,
@@ -60,6 +61,24 @@ export async function runDriveSync(opts: {
       } catch {
         /* */
       }
+    }
+  }
+
+  // A filtered file-type listing is not a complete corpus snapshot. Invalidate
+  // any prior checkpoint before starting it so a crash or later All-files sync
+  // cannot apply deltas to a partial in-memory list.
+  if (typeToUse !== 'all') {
+    await clearChangesPageToken(String(corpus), driveId);
+  }
+
+  // Capture the baseline before enumeration so changes made while listing are
+  // replayed by the first incremental drain after this complete snapshot.
+  let baselineToken: string | null = null;
+  if (typeToUse === 'all') {
+    try {
+      baselineToken = await getChangesStartPageToken(token, corpus, driveId);
+    } catch (e) {
+      console.warn('startPageToken failed before full list; sync will not seed incremental mode', e);
     }
   }
 
@@ -108,12 +127,7 @@ export async function runDriveSync(opts: {
 
   // Only seed Changes API baseline after a complete full enumeration of "all"
   if (complete) {
-    try {
-      const startTok = await getChangesStartPageToken(token, corpus, driveId);
-      await saveChangesPageToken(String(corpus), driveId, startTok);
-    } catch (e) {
-      console.warn('startPageToken failed', e);
-    }
+    if (baselineToken) await saveChangesPageToken(String(corpus), driveId, baselineToken);
   } else if (truncated && typeToUse === 'all') {
     // Incomplete baseline must not unlock incremental mode
     try {

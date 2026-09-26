@@ -13,7 +13,11 @@ export function findDuplicates(files: DriveFile[]): DuplicateGroup[] {
 
   files.forEach(file => {
     let key = file.contentHash;
-    if (!key || key.startsWith('gdrive-') || key.startsWith('user-')) {
+    const verifiedSha = Boolean(
+      key?.startsWith('sha256:') && file.contentHashModifiedTime &&
+      file.contentHashModifiedTime === file.modifiedTime
+    );
+    if (!key || key.startsWith('gdrive-') || key.startsWith('user-') || (key.startsWith('sha256:') && !verifiedSha)) {
       if (!file.size || file.size <= 0) {
         key = `unique:${file.id}`;
       } else {
@@ -39,6 +43,7 @@ export function findDuplicates(files: DriveFile[]): DuplicateGroup[] {
 
       duplicateGroups.push({
         hash,
+        verification: hash.startsWith('sha256:') ? 'sha256' : 'candidate',
         fileCount: sorted.length,
         totalSize,
         reclaimableSize,
@@ -57,7 +62,7 @@ export function findDuplicates(files: DriveFile[]): DuplicateGroup[] {
 
 
 export interface SemanticDuplicateGroup {
-  similarity: number;
+  bestPairSimilarity: number;
   files: DriveFile[];
 }
 
@@ -134,7 +139,7 @@ export function findSemanticDuplicatesFromVectors(
           if (value && value > best) best = value;
         }
       }
-      return { similarity: best, files: group.sort((a, b) => new Date(a.modifiedTime).getTime() - new Date(b.modifiedTime).getTime()) };
+      return { bestPairSimilarity: best, files: group.sort((a, b) => new Date(a.modifiedTime).getTime() - new Date(b.modifiedTime).getTime()) };
     })
-    .sort((a, b) => b.similarity - a.similarity);
+    .sort((a, b) => b.bestPairSimilarity - a.bestPairSimilarity);
 }

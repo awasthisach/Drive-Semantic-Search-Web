@@ -19,6 +19,7 @@ import { withDriveAuthRetry } from '../lib/driveAuth';
 import { verifyFilesHashQueue } from '../lib/hashVerifier';
 import { removeIndexedDocument } from '../lib/contentIndex';
 import { saveDriveMetaSnapshot } from '../lib/driveMetaStore';
+import { fetchWithBackoff } from '../lib/rateLimit';
 import type { DriveAppState } from './useDriveAppState';
 
 /** Bounded concurrency for Drive mutations (quota-friendly). */
@@ -58,6 +59,13 @@ export function useDriveHandlersRest(s: DriveAppState) {
     };
   }, []);
 
+  const removeIndexWithFeedback = (id: string) => {
+    void removeIndexedDocument(id).catch(error => {
+      console.error('[Drive] local index cleanup failed', id, error);
+      showDriveToast('Drive action completed, but local search cleanup failed. Sync again to reconcile.');
+    });
+  };
+
   const handleDeleteFile = async (id: string) => {
     const fileToDelete = files.find(f => f.id === id);
     if (!fileToDelete) return;
@@ -69,7 +77,7 @@ export function useDriveHandlersRest(s: DriveAppState) {
           tok => deleteGoogleDriveFile(tok, id)
         );
         setFiles(prev => prev.filter(f => f.id !== id));
-        void removeIndexedDocument(id);
+        removeIndexWithFeedback(id);
         showDriveToast('Moved to Drive trash: "' + fileToDelete.name + '"');
       } catch (err: any) {
         console.error(err);
@@ -77,7 +85,7 @@ export function useDriveHandlersRest(s: DriveAppState) {
       }
     } else {
       setFiles(prev => prev.filter(f => f.id !== id));
-      void removeIndexedDocument(id);
+      removeIndexWithFeedback(id);
     }
   };
 
@@ -89,7 +97,7 @@ export function useDriveHandlersRest(s: DriveAppState) {
     if (localOnly.length) {
       const localIds = new Set(localOnly.map(f => f.id));
       setFiles(prev => prev.filter(f => !localIds.has(f.id)));
-      for (const lid of localIds) void removeIndexedDocument(lid);
+      for (const lid of localIds) removeIndexWithFeedback(lid);
     }
     if (driveItems.length === 0) return;
     const succeeded: string[] = [];
@@ -110,7 +118,7 @@ export function useDriveHandlersRest(s: DriveAppState) {
     if (succeeded.length) {
       const ok = new Set(succeeded);
       setFiles(prev => prev.filter(f => !ok.has(f.id)));
-      for (const sid of succeeded) void removeIndexedDocument(sid);
+      for (const sid of succeeded) removeIndexWithFeedback(sid);
     }
     if (failed.length) {
       showDriveToast('Delete partial: ' + failed.length + ' failed');
@@ -218,18 +226,37 @@ export function useDriveHandlersRest(s: DriveAppState) {
       }
       const hash = await sha256Blob(blob);
       if (signal.aborted) return;
+      if (file.isGoogleDriveItem && token) {
+        const revisionResponse = await fetchWithBackoff(
+          `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(file.id)}?fields=modifiedTime&supportsAllDrives=true`,
+          { headers: { Authorization: 'Bearer ' + token, Accept: 'application/json' }, signal },
+          { label: 'offline-pin-revision', maxRetries: 3, baseMs: 400 }
+        );
+        if (!revisionResponse.ok) throw new Error('Could not validate Drive revision: ' + revisionResponse.status);
+        const revision = await revisionResponse.json();
+        if (!file.modifiedTime || revision.modifiedTime !== file.modifiedTime) {
+          throw new Error('File changed during offline pin; sync and try again');
+        }
+      }
       const result = await putOfflineBlob(file.id, blob, {
         name: downloadName || file.name,
         mimeType: blob.type || file.mimeType,
         size: blob.size,
         sha256: hash,
+        driveModifiedTime: file.modifiedTime,
       });
       if (signal.aborted) return;
       const offlineIds = new Set((await listOfflineMeta()).map(m => m.id));
       setFiles(prev =>
         prev.map(f => {
           if (f.id === file.id) {
-            return { ...f, isOffline: true, contentHash: 'sha256:' + hash, size: blob.size || f.size };
+            return {
+              ...f,
+              isOffline: true,
+              contentHash: 'sha256:' + hash,
+              contentHashModifiedTime: f.modifiedTime,
+              size: blob.size || f.size,
+            };
           }
           if (f.isOffline && !offlineIds.has(f.id)) {
             return { ...f, isOffline: false };
@@ -257,7 +284,7 @@ export function useDriveHandlersRest(s: DriveAppState) {
     showDriveToast('Verifying SHA-256 for ' + targets.length + ' file(s)…');
 
     // Race-free: accumulate hashes locally, apply once, then persist durable snapshot.
-    const hashResults = new Map<string, { contentHash: string; size: number }>();
+    const hashResults = new Map<string, { contentHash: string; size: number; modifiedTime: string }>();
 
     try {
       const { ok, failed } = await withDriveAuthRetry(
@@ -265,8 +292,8 @@ export function useDriveHandlersRest(s: DriveAppState) {
         tok => setGoogleAccessToken(tok),
         tok =>
           verifyFilesHashQueue(tok, targets, {
-            onHashed: (id, contentHash, size) => {
-              hashResults.set(id, { contentHash, size: size || 0 });
+            onHashed: (id, contentHash, size, modifiedTime) => {
+              hashResults.set(id, { contentHash, size: size || 0, modifiedTime });
             },
           })
       );
@@ -276,7 +303,12 @@ export function useDriveHandlersRest(s: DriveAppState) {
           prev.map(f => {
             const r = hashResults.get(f.id);
             return r
-              ? { ...f, contentHash: r.contentHash, size: r.size || f.size }
+              ? {
+                  ...f,
+                  contentHash: r.contentHash,
+                  contentHashModifiedTime: r.modifiedTime,
+                  size: r.size || f.size,
+                }
               : f;
           })
         );
@@ -284,7 +316,12 @@ export function useDriveHandlersRest(s: DriveAppState) {
         const mergedFiles = files.map(f => {
           const r = hashResults.get(f.id);
           return r
-            ? { ...f, contentHash: r.contentHash, size: r.size || f.size }
+            ? {
+                ...f,
+                contentHash: r.contentHash,
+                contentHashModifiedTime: r.modifiedTime,
+                size: r.size || f.size,
+              }
             : f;
         });
 

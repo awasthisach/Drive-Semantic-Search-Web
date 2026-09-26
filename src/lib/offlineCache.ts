@@ -1,4 +1,5 @@
 import { fetchWithBackoff } from './rateLimit';
+import type { DriveFile } from '../types';
 /**
  * IndexedDB cache for offline-pinned file bytes.
  * Quota: max total bytes + max entries; true LRU — getOfflineBlob touches cachedAt.
@@ -20,6 +21,26 @@ export interface OfflineBlobMeta {
   size: number;
   cachedAt: string;
   sha256?: string;
+  driveModifiedTime?: string;
+}
+
+export function applyOfflineMetaToDriveFiles(files: DriveFile[], metas: OfflineBlobMeta[]): DriveFile[] {
+  const metaById = new Map(metas.map(meta => [meta.id, meta]));
+  return files.map(file => {
+    const meta = metaById.get(file.id);
+    if (!meta) return file;
+    const revisionMatches = Boolean(meta.driveModifiedTime && meta.driveModifiedTime === file.modifiedTime);
+    const verifiedHash = meta.sha256 && revisionMatches ? 'sha256:' + meta.sha256 : undefined;
+    const contentHash = verifiedHash || (
+      file.contentHash.startsWith('sha256:') ? `gdrive-${file.id}-${file.size}` : file.contentHash
+    );
+    return {
+      ...file,
+      isOffline: true,
+      contentHash,
+      contentHashModifiedTime: verifiedHash ? meta.driveModifiedTime : undefined,
+    };
+  });
 }
 
 export interface CacheStats {
@@ -126,7 +147,7 @@ export async function getCacheStats(): Promise<CacheStats> {
 export async function putOfflineBlob(
   id: string,
   blob: Blob,
-  meta: { name: string; mimeType: string; size: number; sha256?: string }
+  meta: { name: string; mimeType: string; size: number; sha256?: string; driveModifiedTime?: string }
 ): Promise<{ evictedIds: string[] }> {
   const db = await openDb();
   const size = meta.size || blob.size || 0;
@@ -148,6 +169,7 @@ export async function putOfflineBlob(
       mimeType: meta.mimeType,
       size,
       sha256: meta.sha256,
+      driveModifiedTime: meta.driveModifiedTime,
       cachedAt: new Date().toISOString(),
     });
     tx.oncomplete = () => resolve();
@@ -215,6 +237,7 @@ export async function listOfflineMeta(): Promise<OfflineBlobMeta[]> {
       size: r.size,
       cachedAt: r.cachedAt,
       sha256: r.sha256,
+      driveModifiedTime: r.driveModifiedTime,
     }));
   } catch {
     return [];

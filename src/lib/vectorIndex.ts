@@ -355,21 +355,25 @@ export async function removeVectorsForFile(
   fileId: string,
   corpusKey?: string
 ): Promise<number> {
-  try {
-    const existing = await getVectorsForFile(fileId, corpusKey);
-    if (!existing.length) return 0;
-    const db = await openDb();
-    await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction(VECTOR_STORE, 'readwrite');
-      for (const v of existing) tx.objectStore(VECTOR_STORE).delete(v.id);
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
-    return existing.length;
-  } catch (e) {
-    console.warn('[vectorIndex] remove failed', fileId, e);
-    return 0;
-  }
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(VECTOR_STORE, 'readwrite');
+    const cursorRequest = tx.objectStore(VECTOR_STORE).index('fileId').openCursor(IDBKeyRange.only(fileId));
+    let removed = 0;
+    cursorRequest.onsuccess = () => {
+      const cursor = cursorRequest.result;
+      if (!cursor) return;
+      const record = cursor.value as VectorRecord;
+      if (!corpusKey || record.corpusKey === corpusKey) {
+        cursor.delete();
+        removed++;
+      }
+      cursor.continue();
+    };
+    tx.oncomplete = () => resolve(removed);
+    tx.onerror = () => reject(tx.error || new Error('vector removal failed'));
+    tx.onabort = () => reject(tx.error || new Error('vector removal aborted'));
+  });
 }
 
 export async function embedAndStoreChunks(opts: {
