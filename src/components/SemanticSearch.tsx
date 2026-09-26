@@ -197,6 +197,11 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
     let truncated = 0;
     const failedNames: string[] = [];
     const n = extractable.length;
+    // Reuse one provider for the whole run. It is stateless; recreating it for
+    // every file added avoidable setup and token-provider work to large scans.
+    const embeddingProvider = isEmbedConfigured()
+      ? createEmbeddingProvider(() => getFirebaseIdToken())
+      : null;
     const sig = await buildIndexSignature(corpusKey, extractable);
     let startAt = readCursor(sig, n);
     if (startAt > 0) {
@@ -220,21 +225,20 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
       try {
         const existing = await getIndexedDocument(f.id);
         if (!isDocumentStale(existing, f.modifiedTime)) {
-          if (isEmbedConfigured() && existing?.text) {
-            const provider = createEmbeddingProvider(() => getFirebaseIdToken());
+          if (embeddingProvider && existing?.text) {
             const chunks = buildEmbeddingChunks(existing.name || f.name, existing.text);
             const compatible = await hasCompatibleVectorSet({
               fileId: f.id,
               corpusKey,
               chunks,
-              embeddingModel: provider.embeddingModel,
-              embeddingVersion: provider.embeddingVersion,
-              dimension: provider.dimension,
+              embeddingModel: embeddingProvider.embeddingModel,
+              embeddingVersion: embeddingProvider.embeddingVersion,
+              dimension: embeddingProvider.dimension,
             });
             if (!compatible) {
               setIndexProgress(`Migrating embeddings ${i + 1}/${extractable.length}: ${f.name}`);
               const migration = await embedAndStoreChunks({
-                provider,
+                provider: embeddingProvider,
                 fileId: f.id,
                 chunks,
                 corpusKey,
@@ -266,12 +270,11 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
             textTruncated: wasTrunc,
             corpusKey,
           });
-          if (isEmbedConfigured()) {
+          if (embeddingProvider) {
             try {
-              const provider = createEmbeddingProvider(() => getFirebaseIdToken());
               const chunks = buildEmbeddingChunks(f.name, text.slice(0, MAX_INDEX_CHARS));
               const embedding = await embedAndStoreChunks({
-                provider,
+                provider: embeddingProvider,
                 fileId: f.id,
                 chunks,
                 corpusKey,
@@ -294,7 +297,9 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
         fail++;
         if (failedNames.length < 20) failedNames.push(f.name);
       }
-      await new Promise(r => setTimeout(r, 100));
+      // Yield periodically so large scans keep the UI responsive without
+      // imposing a 100 ms delay on every file.
+      if ((i - startAt + 1) % 8 === 0) await new Promise(r => setTimeout(r, 0));
     }
 
     if (!cancelIndexRef.current) {

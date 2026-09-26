@@ -20,7 +20,7 @@ export default defineConfig(() => {
           id: './',
           name: 'Drive Semantic Search',
           short_name: 'DriveSearch',
-          description: 'Google Drive metadata browser with keyword search and session encrypted notes (prototype).',
+          description: 'Google Drive browser with hybrid search, duplicate selection/move, semantic duplicate review, and encrypted notes.',
           theme_color: '#09090b',
           background_color: '#09090b',
           display: 'standalone',
