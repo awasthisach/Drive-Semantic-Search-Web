@@ -133,6 +133,8 @@ export function useDriveAppState() {
           const savedDriveId = sessionStorage.getItem('drive_shared_id') || undefined;
           setDriveCorpus(savedCorpus);
           if (savedDriveId) setSharedDriveId(savedDriveId);
+          let progressiveFiles: DriveFile[] = [];
+          let progressiveFolders: FolderItem[] = [];
           const result = await runDriveSync({
             token,
             typeToUse: 'all',
@@ -141,6 +143,24 @@ export function useDriveAppState() {
             // Use refs so we merge against cached/snapshot state, not mount-time INITIAL_FILES
             currentFiles: filesRef.current,
             currentFolders: foldersRef.current,
+            onProgress: (p) => {
+              progressiveFiles = progressiveFiles.concat(p.pageFiles);
+              progressiveFolders = progressiveFolders.concat(p.pageFolders);
+              setFiles(prev => {
+                const nonDrive = prev.filter(f => !f.isGoogleDriveItem);
+                const seen = new Set(progressiveFiles.map(f => f.id));
+                return [...progressiveFiles, ...nonDrive.filter(f => !seen.has(f.id))];
+              });
+              setFolders(prev => {
+                const seen = new Set(progressiveFolders.map(f => f.id));
+                return [...progressiveFolders, ...prev.filter(f => !seen.has(f.id))];
+              });
+              setSyncStats(s => ({
+                ...s,
+                status: 'syncing',
+                totalSyncedCount: progressiveFiles.length,
+              }));
+            },
           });
           setDriveTruncated(result.truncated);
           setFiles(result.files);
