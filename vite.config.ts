@@ -20,7 +20,7 @@ export default defineConfig(() => {
           id: './',
           name: 'Drive Semantic Search',
           short_name: 'DriveSearch',
-          description: 'Google Drive browser with hybrid search, duplicate selection/move, semantic duplicate review, and encrypted notes.',
+          description: 'Google Drive browser by Vishva Vijayaa Foundation — hybrid search, duplicate selection/move, semantic review, encrypted notes.',
           theme_color: '#09090b',
           background_color: '#09090b',
           display: 'standalone',

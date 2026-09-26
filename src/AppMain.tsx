@@ -1,5 +1,6 @@
 import React from 'react';
-import { Cloud, CheckCircle2, X } from 'lucide-react';
+import { CheckCircle2, X } from 'lucide-react';
+import { BrandMark, BrandFooter } from './components/BrandMark';
 import { Dashboard } from './components/Dashboard';
 import { OfflineIndicator } from './components/OfflineIndicator';
 import { MoveToFolderModal } from './components/MoveToFolderModal';
@@ -55,10 +56,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100">
       <header className="sticky top-0 z-40 border-b border-zinc-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-900/90 backdrop-blur px-4 py-3 flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <Cloud className="w-5 h-5 text-blue-600" />
-          <span className="font-bold text-sm">Drive Semantic Search</span>
-        </div>
+        <BrandMark size={34} />
         <div className="flex items-center gap-2">
           <button
             type="button"
@@ -193,6 +191,8 @@ export default function App() {
           />
         </React.Suspense>
       )}
+
+      <BrandFooter />
 
       {searchMoveTargetFile && (
         <MoveToFolderModal
