@@ -4,12 +4,22 @@ import { fetchWithBackoff } from './rateLimit';
 
 const FOLDER_COLORS = ['blue', 'emerald', 'purple', 'amber', 'rose', 'indigo', 'cyan', 'zinc'];
 
+export interface DriveFetchProgress {
+  filesSoFar: number;
+  foldersSoFar: number;
+  pagesFetched: number;
+  pageFiles: DriveFile[];
+  pageFolders: FolderItem[];
+}
+
 export interface DriveFetchResult {
   files: DriveFile[];
   folders: FolderItem[];
   truncated: boolean;
   pagesFetched: number;
 }
+
+export type DriveFetchOnProgress = (p: DriveFetchProgress) => void | Promise<void>;
 
 export type DriveFileTypeFilter = 'all' | 'documents' | 'images' | 'videos' | 'spreadsheets' | 'pdfs' | 'folders';
 
@@ -72,12 +82,61 @@ function buildDriveQuery(fileType: DriveFileTypeFilter = 'all'): string {
   }
 }
 
+const HARD_PAGE_CEILING = 10_000;
+
+function mapRawItem(
+  item: any,
+  colorIdx: number
+): { kind: 'folder'; folder: FolderItem; colorIdx: number } | { kind: 'file'; file: DriveFile; colorIdx: number } {
+  if (item.mimeType === 'application/vnd.google-apps.folder') {
+    return {
+      kind: 'folder',
+      folder: {
+        id: item.id,
+        name: item.name,
+        color: FOLDER_COLORS[colorIdx % FOLDER_COLORS.length],
+        description: item.description || `Google Drive folder with ${item.name}`,
+        createdAt: item.createdTime,
+      },
+      colorIdx: colorIdx + 1,
+    };
+  }
+  const category = getCategoryFromMime(item.mimeType || '', item.name || '');
+  const primaryParent = item.parents && item.parents.length > 0 ? item.parents[0] : undefined;
+  return {
+    kind: 'file',
+    file: {
+      id: item.id,
+      name: item.name,
+      mimeType: item.mimeType || 'application/octet-stream',
+      size: item.size ? parseInt(item.size, 10) : 0,
+      modifiedTime: item.modifiedTime || new Date().toISOString(),
+      createdTime: item.createdTime || new Date().toISOString(),
+      category,
+      folderId: primaryParent,
+      thumbnailUrl: item.thumbnailLink,
+      webViewLink: item.webViewLink,
+      iconLink: item.iconLink,
+      parentIds: item.parents || [],
+      isGoogleDriveItem: true,
+      isOffline: false,
+      isEncrypted: false,
+      contentHash: `gdrive-${item.id}-${item.size || 0}`,
+      tags: ['google-drive', category, primaryParent ? 'categorized' : 'root'],
+      semanticSummary: item.description || `Google Drive file "${item.name}" of type ${item.mimeType}`,
+      starred: Boolean(item.starred),
+    },
+    colorIdx,
+  };
+}
+
 export async function fetchGoogleDriveData(
   accessToken: string,
   fileType: DriveFileTypeFilter = 'all',
-  maxPages: number = 40,
+  maxPages?: number,
   corpus: DriveCorpus = 'user',
-  driveId?: string
+  driveId?: string,
+  onProgress?: DriveFetchOnProgress
 ): Promise<DriveFetchResult> {
   if (!accessToken || typeof accessToken !== 'string') {
     throw new Error('fetchGoogleDriveData: accessToken is required');
@@ -86,9 +145,10 @@ export async function fetchGoogleDriveData(
   if (!allowedTypes.includes(fileType)) {
     throw new Error('fetchGoogleDriveData: invalid fileType');
   }
-  if (!Number.isFinite(maxPages) || maxPages < 1 || maxPages > 100) {
-    throw new Error('fetchGoogleDriveData: maxPages must be 1–100');
-  }
+  const pageLimit =
+    maxPages != null && Number.isFinite(maxPages) && maxPages >= 1
+      ? Math.min(Math.floor(maxPages), HARD_PAGE_CEILING)
+      : HARD_PAGE_CEILING;
   const allowedCorpus: DriveCorpus[] = ['user', 'allDrives', 'drive'];
   if (!allowedCorpus.includes(corpus)) {
     throw new Error('fetchGoogleDriveData: invalid corpus');
@@ -98,11 +158,13 @@ export async function fetchGoogleDriveData(
   }
   const fields = 'files(id,name,mimeType,size,modifiedTime,createdTime,thumbnailLink,webViewLink,iconLink,parents,trashed,description,starred),nextPageToken';
   const query = buildDriveQuery(fileType);
-  const rawItems: any[] = [];
+  const folders: FolderItem[] = [];
+  const files: DriveFile[] = [];
   let pageToken: string | undefined;
   let pagesFetched = 0;
+  let colorIdx = 0;
 
-  for (let page = 0; page < maxPages; page++) {
+  for (let page = 0; page < pageLimit; page++) {
     const params = new URLSearchParams({
       pageSize: '500',
       fields,
@@ -140,54 +202,36 @@ export async function fetchGoogleDriveData(
     }
 
     const data = await response.json();
-    rawItems.push(...(data.files || []));
+    const pageFiles: DriveFile[] = [];
+    const pageFolders: FolderItem[] = [];
+    for (const item of data.files || []) {
+      const mapped = mapRawItem(item, colorIdx);
+      colorIdx = mapped.colorIdx;
+      if (mapped.kind === 'folder') {
+        folders.push(mapped.folder);
+        pageFolders.push(mapped.folder);
+      } else {
+        files.push(mapped.file);
+        pageFiles.push(mapped.file);
+      }
+    }
     pagesFetched = page + 1;
     pageToken = data.nextPageToken;
+
+    if (onProgress) {
+      await onProgress({
+        filesSoFar: files.length,
+        foldersSoFar: folders.length,
+        pagesFetched,
+        pageFiles,
+        pageFolders,
+      });
+    }
+
     if (!pageToken) break;
   }
 
   const truncated = Boolean(pageToken);
-  const folders: FolderItem[] = [];
-  const files: DriveFile[] = [];
-  let colorIdx = 0;
-
-  for (const item of rawItems) {
-    if (item.mimeType === 'application/vnd.google-apps.folder') {
-      folders.push({
-        id: item.id,
-        name: item.name,
-        color: FOLDER_COLORS[colorIdx % FOLDER_COLORS.length],
-        description: item.description || `Google Drive folder with ${item.name}`,
-        createdAt: item.createdTime,
-      });
-      colorIdx++;
-    } else {
-      const category = getCategoryFromMime(item.mimeType || '', item.name || '');
-      const primaryParent = item.parents && item.parents.length > 0 ? item.parents[0] : undefined;
-      files.push({
-        id: item.id,
-        name: item.name,
-        mimeType: item.mimeType || 'application/octet-stream',
-        size: item.size ? parseInt(item.size, 10) : 0,
-        modifiedTime: item.modifiedTime || new Date().toISOString(),
-        createdTime: item.createdTime || new Date().toISOString(),
-        category,
-        folderId: primaryParent,
-        thumbnailUrl: item.thumbnailLink,
-        webViewLink: item.webViewLink,
-        iconLink: item.iconLink,
-        parentIds: item.parents || [],
-        isGoogleDriveItem: true,
-        isOffline: false,
-        isEncrypted: false,
-        contentHash: `gdrive-${item.id}-${item.size || 0}`,
-        tags: ['google-drive', category, primaryParent ? 'categorized' : 'root'],
-        semanticSummary: item.description || `Google Drive file "${item.name}" of type ${item.mimeType}`,
-        starred: Boolean(item.starred),
-      });
-    }
-  }
-
   return { files, folders, truncated, pagesFetched };
 }
 

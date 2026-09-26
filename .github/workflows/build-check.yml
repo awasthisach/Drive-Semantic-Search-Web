@@ -1,0 +1,56 @@
+name: Build Check
+
+on:
+  push:
+    branches: ["main", "master"]
+  pull_request:
+    branches: ["main", "master"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-check-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Install, typecheck, and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install complete dependency tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if npm ci --no-audit --no-fund; then
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "npm ci failed (attempt $attempt/3); retrying..."
+              sleep 5
+            fi
+          done
+          echo "npm ci failed after 3 attempts"
+          exit 1
+
+      - name: Typecheck
+        run: npm run lint
+
+      - name: Production build (final gate)
+        env:
+          VITE_EMBED_ENDPOINT: ${{ secrets.VITE_EMBED_ENDPOINT || 'https://drive-semantic-embed.awasthi-sach.workers.dev' }}
+        run: npm run build

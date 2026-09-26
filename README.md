@@ -23,7 +23,7 @@ Client-side Progressive Web App for Google Drive with **hybrid semantic search**
   - Hindi/Hinglish query expansion (lightweight pairs; preserves Devanagari combining marks)
 - **Content + vector index** — IndexedDB BM25 docs/chunks/postings **and** separate vector store; versioned multi-probe LSH bucket index for large-corpus candidate retrieval; content-hash skip re-embed; cancel + progress; **resume cursor** (SHA-256 signature of corpus file list); idle ANN warm-up with Web Locks coordination across tabs
 - **Select all visible** — pagination-aware (current page only)
-- **Offline pin** — IndexedDB LRU + SHA-256; browser storage quota on Offline tab
+- **Offline pin** — IndexedDB LRU + SHA-256; browser storage quota on offline tab
 - **Vault** — PBKDF2 310k + AES-GCM (Worker + main-thread fallback)
 - **Duplicates** — select duplicate/candidate files individually or in bulk; move selected files to Drive root or any folder; trash remains locked until SHA-256 verify; durable hash snapshot
 - **Semantic duplicate review** — after content embedding, compare file-level embedding centroids with a user-selected similarity threshold (85/90/95%); semantic matches are review-only and can be selected for move, never auto-trashed
@@ -176,7 +176,7 @@ Google Drive OAuth uses the public client configuration in `firebase-applet-conf
 - Semantic duplicate groups use the centroid of indexed chunk embeddings. They are similarity candidates, not proof of byte-identical files; exact duplicate trash requires SHA-256 verification.
 - Filtered type syncs use full list; incremental only for type = **all**
 - Broad `drive` OAuth scope; access token in `sessionStorage` (see [SECURITY.md](SECURITY.md))
-- List pagination capped (~20k) with truncation banner
+- Progressive chunked listing (pageSize 500) with live UI updates; safety ceiling only (~5M files) + truncation banner if hit
 - Missing size → **Size unknown** (never invented)
 
 ---
