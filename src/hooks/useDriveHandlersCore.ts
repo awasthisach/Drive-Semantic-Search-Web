@@ -95,6 +95,8 @@ export function useDriveHandlersCore(s: DriveAppState) {
           isConnected: true,
         });
         try {
+          let progressiveFiles: typeof files = [];
+          let progressiveFolders: typeof folders = [];
           const syncResult = await runDriveSync({
             token: result.accessToken,
             typeToUse: driveFileTypeFilter,
@@ -102,6 +104,24 @@ export function useDriveHandlersCore(s: DriveAppState) {
             driveId: sharedDriveId || undefined,
             currentFiles: files,
             currentFolders: folders,
+            onProgress: (p) => {
+              progressiveFiles = progressiveFiles.concat(p.pageFiles);
+              progressiveFolders = progressiveFolders.concat(p.pageFolders);
+              setFiles(prev => {
+                const nonDrive = prev.filter(f => !f.isGoogleDriveItem);
+                const seen = new Set(progressiveFiles.map(f => f.id));
+                return [...progressiveFiles, ...nonDrive.filter(f => !seen.has(f.id))];
+              });
+              setFolders(prev => {
+                const seen = new Set(progressiveFolders.map(f => f.id));
+                return [...progressiveFolders, ...prev.filter(f => !seen.has(f.id))];
+              });
+              setSyncStats(s => ({
+                ...s,
+                status: 'syncing',
+                totalSyncedCount: progressiveFiles.length,
+              }));
+            },
           });
           setDriveTruncated(syncResult.truncated);
           setFiles(syncResult.files);
@@ -174,6 +194,8 @@ export function useDriveHandlersCore(s: DriveAppState) {
     const dId = driveIdOverride !== undefined ? driveIdOverride : sharedDriveId;
 
     const runFetch = async (tok: string) => {
+      let progressiveFiles: typeof files = [];
+      let progressiveFolders: typeof folders = [];
       const result = await runDriveSync({
         token: tok,
         typeToUse,
@@ -181,6 +203,25 @@ export function useDriveHandlersCore(s: DriveAppState) {
         driveId: dId || undefined,
         currentFiles: files,
         currentFolders: folders,
+        onProgress: (p) => {
+          progressiveFiles = progressiveFiles.concat(p.pageFiles);
+          progressiveFolders = progressiveFolders.concat(p.pageFolders);
+          // Progressive UI: show partial list as pages arrive
+          setFiles(prev => {
+            const nonDrive = prev.filter(f => !f.isGoogleDriveItem);
+            const seen = new Set(progressiveFiles.map(f => f.id));
+            return [...progressiveFiles, ...nonDrive.filter(f => !seen.has(f.id))];
+          });
+          setFolders(prev => {
+            const seen = new Set(progressiveFolders.map(f => f.id));
+            return [...progressiveFolders, ...prev.filter(f => !seen.has(f.id))];
+          });
+          setSyncStats(s => ({
+            ...s,
+            status: 'syncing',
+            totalSyncedCount: progressiveFiles.length,
+          }));
+        },
       });
       setDriveTruncated(result.truncated);
       setFiles(result.files);
