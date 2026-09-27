@@ -250,7 +250,6 @@ export const DuplicateFinder: React.FC<DuplicateFinderProps> = ({ files, folders
             {semanticStatus && <p className="text-[11px] text-zinc-600 dark:text-zinc-400" role="status">{semanticStatus}</p>}
             {semanticGroups.map((group, index) => (
               <div key={`${index}-${group.files.map(file => file.id).join('-')}`} className="rounded-xl border border-indigo-200/70 dark:border-indigo-900/60 bg-white/70 dark:bg-zinc-900/60 p-3">
-<<<<<<< HEAD
                 <div className="flex items-center justify-between gap-2 mb-2"><span className="text-xs font-bold text-indigo-700 dark:text-indigo-300" title="Strongest direct pair in this connected group. Some members may be linked indirectly; review before acting.">Best pair similarity {Math.round(group.bestPairSimilarity * 100)}%</span><button type="button" onClick={() => selectSemanticGroup(group)} className="text-[11px] text-indigo-600 hover:underline">Select non-primary for move</button></div>
                 <div className="space-y-1">{group.files.map(file => <label key={file.id} className="flex items-center gap-2 text-xs"><input type="checkbox" checked={selectedForMove.has(file.id)} onChange={() => toggleMove(file.id)} /><span className="truncate">{file.name}</span></label>)}</div>
               </div>
