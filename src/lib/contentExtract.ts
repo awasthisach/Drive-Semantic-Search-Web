@@ -82,7 +82,7 @@ export async function extractDriveFileText(
 
   if (m === 'application/vnd.google-apps.document') {
     const res = await driveFetch(
-      `https://www.googleapis.com/drive/v3/files/${fileId}/export?mimeType=${encodeURIComponent('text/plain')}`,
+      `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}/export?mimeType=${encodeURIComponent('text/plain')}`,
       accessToken,
       'doc-export'
     );
@@ -92,7 +92,7 @@ export async function extractDriveFileText(
 
   if (m === 'application/vnd.google-apps.spreadsheet') {
     const res = await driveFetch(
-      `https://www.googleapis.com/drive/v3/files/${fileId}/export?mimeType=${encodeURIComponent('text/csv')}`,
+      `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}/export?mimeType=${encodeURIComponent('text/csv')}`,
       accessToken,
       'sheet-export'
     );
@@ -102,7 +102,7 @@ export async function extractDriveFileText(
 
   if (m === 'application/vnd.google-apps.presentation') {
     const res = await driveFetch(
-      `https://www.googleapis.com/drive/v3/files/${fileId}/export?mimeType=${encodeURIComponent('text/plain')}`,
+      `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}/export?mimeType=${encodeURIComponent('text/plain')}`,
       accessToken,
       'slides-export'
     );
@@ -112,7 +112,7 @@ export async function extractDriveFileText(
 
   if (m.startsWith('text/') || TEXTISH.includes(m) || /\.(txt|md|csv|json|xml|html|log)$/i.test(name || '')) {
     const res = await driveFetch(
-      `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`,
+      `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true`,
       accessToken,
       'binary-text'
     );

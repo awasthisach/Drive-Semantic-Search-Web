@@ -298,7 +298,7 @@ export async function downloadDriveFileBytes(
   const headers = { Authorization: 'Bearer ' + accessToken };
   if (native) {
     const res = await fetchWithBackoff(
-      `https://www.googleapis.com/drive/v3/files/${fileId}/export?mimeType=${encodeURIComponent(native.exportMime)}`,
+      `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}/export?mimeType=${encodeURIComponent(native.exportMime)}`,
       { headers, signal: opts?.signal },
       { label: 'files.export', maxRetries: 4, baseMs: 400 }
     );
@@ -307,7 +307,7 @@ export async function downloadDriveFileBytes(
   }
 
   const res = await fetchWithBackoff(
-    `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`,
+    `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true`,
     { headers, signal: opts?.signal },
     { label: 'files.download', maxRetries: 4, baseMs: 400 }
   );

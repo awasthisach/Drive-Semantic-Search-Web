@@ -244,7 +244,7 @@ export async function moveGoogleDriveFile(
   let previousParents = currentParentIds.join(',');
   if (!previousParents) {
     const metaRes = await fetchWithBackoff(
-      `https://www.googleapis.com/drive/v3/files/${fileId}?fields=parents&supportsAllDrives=true`,
+      `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?fields=parents&supportsAllDrives=true`,
       { headers: { Authorization: `Bearer ${accessToken}` } },
       { label: 'files.get.parents', maxRetries: 3, baseMs: 400 }
     );
@@ -259,7 +259,7 @@ export async function moveGoogleDriveFile(
   params.set('fields', 'id,parents');
   params.set('supportsAllDrives', 'true');
   const response = await fetchWithBackoff(
-    `https://www.googleapis.com/drive/v3/files/${fileId}?${params.toString()}`,
+    `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?${params.toString()}`,
     {
       method: 'PATCH',
       headers: {
@@ -306,7 +306,7 @@ export async function deleteGoogleDriveFile(
   fileId: string
 ): Promise<void> {
   const response = await fetchWithBackoff(
-    `https://www.googleapis.com/drive/v3/files/${fileId}?supportsAllDrives=true`,
+    `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?supportsAllDrives=true`,
     {
       method: 'PATCH',
       headers: {
@@ -329,7 +329,7 @@ export async function starGoogleDriveFile(
   starred: boolean
 ): Promise<void> {
   const response = await fetchWithBackoff(
-    `https://www.googleapis.com/drive/v3/files/${fileId}?supportsAllDrives=true`,
+    `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?supportsAllDrives=true`,
     {
       method: 'PATCH',
       headers: {
