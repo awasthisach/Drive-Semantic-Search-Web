@@ -45,38 +45,24 @@ export class BackendEmbeddingProvider implements EmbeddingProvider {
     return rows[0] || [];
   }
 
-  private async embed(
-    texts: string[],
-    mode: EmbedRequest['mode']
-  ): Promise<number[][]> {
+  private async embed(texts: string[], mode: EmbedRequest['mode']): Promise<number[][]> {
     if (!isEmbedConfigured()) {
-      throw new EmbedConfigError(
-        'VITE_EMBED_ENDPOINT is not set. Deploy workers/embed and set the public URL.'
-      );
+      throw new EmbedConfigError('VITE_EMBED_ENDPOINT is not set. Deploy workers/embed and set the public URL.');
     }
     if (!texts.length) return [];
 
-    const cleaned = texts.map(t =>
-      (t || '').slice(0, EMBED_CONFIG.maxCharsPerText)
-    );
+    const cleaned = texts.map(t => (t || '').slice(0, EMBED_CONFIG.maxCharsPerText));
     if (cleaned.length > EMBED_CONFIG.maxTextsPerBatch) {
-      throw new EmbedApiError(
-        400,
-        `Batch too large (max ${EMBED_CONFIG.maxTextsPerBatch})`
-      );
+      throw new EmbedApiError(400, `Batch too large (max ${EMBED_CONFIG.maxTextsPerBatch})`);
     }
 
     const body: EmbedRequest = { texts: cleaned, mode, version: EMBED_CONFIG.version };
     const maxRetries = 5;
     const timeoutMs = 45_000;
 
-    // The embedding endpoint is a pure computation endpoint: retrying the same
-    // request after a timeout/429/5xx cannot create duplicate Drive resources.
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       const token = await this.getIdToken();
-      if (!token) {
-        throw new EmbedAuthError('Sign in required to generate embeddings');
-      }
+      if (!token) throw new EmbedAuthError('Sign in required to generate embeddings');
 
       const controller = new AbortController();
       const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
@@ -93,37 +79,20 @@ export class BackendEmbeddingProvider implements EmbeddingProvider {
 
         if (res.ok) {
           const data = (await res.json()) as EmbedResponse;
-          if (!data?.embeddings || !Array.isArray(data.embeddings)) {
-            throw new EmbedApiError(502, 'Invalid embed response shape');
-          }
-          if (data.embeddings.length !== cleaned.length) {
-            throw new EmbedApiError(502, 'Embed response length mismatch');
-          }
+          if (!data?.embeddings || !Array.isArray(data.embeddings)) throw new EmbedApiError(502, 'Invalid embed response shape');
+          if (data.embeddings.length !== cleaned.length) throw new EmbedApiError(502, 'Embed response length mismatch');
           for (const row of data.embeddings) {
-            if (
-              !Array.isArray(row) ||
-              row.length !== EMBED_CONFIG.dimension ||
-              row.some(value => !Number.isFinite(value))
-            ) {
-              throw new EmbedApiError(
-                502,
-                `Embed dimension mismatch (expected ${EMBED_CONFIG.dimension}, got ${Array.isArray(row) ? row.length : 0})`
-              );
+            if (!Array.isArray(row) || row.length !== EMBED_CONFIG.dimension || row.some(value => !Number.isFinite(value))) {
+              throw new EmbedApiError(502, `Embed dimension mismatch (expected ${EMBED_CONFIG.dimension}, got ${Array.isArray(row) ? row.length : 0})`);
             }
           }
-          if (data.model !== EMBED_CONFIG.model) {
-            throw new EmbedApiError(502, `Embed model mismatch (expected ${EMBED_CONFIG.model}, got ${data.model})`);
-          }
-          if (data.version !== EMBED_CONFIG.version) {
-            throw new EmbedApiError(502, `Embed version mismatch (expected ${EMBED_CONFIG.version}, got ${data.version})`);
-          }
-          if (data.dimension !== EMBED_CONFIG.dimension) {
-            throw new EmbedApiError(502, `Embed dimension metadata mismatch (expected ${EMBED_CONFIG.dimension}, got ${data.dimension})`);
-          }
+          if (data.model !== EMBED_CONFIG.model) throw new EmbedApiError(502, `Embed model mismatch (expected ${EMBED_CONFIG.model}, got ${data.model})`);
+          if (data.version !== EMBED_CONFIG.version) throw new EmbedApiError(502, `Embed version mismatch (expected ${EMBED_CONFIG.version}, got ${data.version})`);
+          if (data.dimension !== EMBED_CONFIG.dimension) throw new EmbedApiError(502, `Embed dimension metadata mismatch (expected ${EMBED_CONFIG.dimension}, got ${data.dimension})`);
           return data.embeddings;
         }
 
-        if ((res.status === 401 || res.status === 403) && res.status !== 429) {
+        if (res.status === 401 || res.status === 403) {
           throw new EmbedAuthError('Embedding auth failed (' + res.status + ')');
         }
 
@@ -144,13 +113,8 @@ export class BackendEmbeddingProvider implements EmbeddingProvider {
         await sleep(waitMs);
       } catch (error) {
         if (error instanceof EmbedApiError || error instanceof EmbedAuthError) throw error;
-        if (attempt === maxRetries) {
-          throw new EmbedApiError(408, 'Embedding request timed out after retries');
-        }
-        const waitMs = Math.min(
-          Math.round(1_000 * Math.pow(2, attempt) * (0.75 + Math.random() * 0.5)),
-          60_000
-        );
+        if (attempt === maxRetries) throw new EmbedApiError(408, 'Embedding request timed out after retries');
+        const waitMs = Math.min(Math.round(1_000 * Math.pow(2, attempt) * (0.75 + Math.random() * 0.5)), 60_000);
         console.warn(`[embedding] timeout/network error, retry ${attempt + 1}/${maxRetries} in ${waitMs}ms`);
         await sleep(waitMs);
       } finally {
@@ -162,9 +126,6 @@ export class BackendEmbeddingProvider implements EmbeddingProvider {
   }
 }
 
-/** Factory used by future indexing/search wiring (Phase 4). */
-export function createEmbeddingProvider(
-  getIdToken: () => Promise<string | null>
-): EmbeddingProvider {
+export function createEmbeddingProvider(getIdToken: () => Promise<string | null>): EmbeddingProvider {
   return new BackendEmbeddingProvider(getIdToken);
 }
