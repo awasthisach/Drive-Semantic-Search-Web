@@ -68,7 +68,7 @@ async function driveFetch(url: string, accessToken: string, label: string): Prom
   return fetchWithBackoff(
     url,
     { headers: { Authorization: 'Bearer ' + accessToken } },
-    { label, maxRetries: 5, baseMs: 600 }
+    { label, maxRetries: 5, baseMs: 600, timeoutMs: 45_000 }
   );
 }
 
