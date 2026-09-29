@@ -26,7 +26,7 @@ const MAX_BINARY_BYTES = 50 * 1024 * 1024;
 
 export interface ExtractResult {
   text: string;
-  source: 'export' | 'binary-text' | 'ocr';
+  source: 'export' | 'binary-text';
   truncated: boolean;
   note?: string;
 }
@@ -104,7 +104,7 @@ export async function extractDriveFileText(accessToken: string, fileId: string, 
       text = await extractPdfText(buffer);
       if (!text.trim()) {
         text = await ocrPdf(buffer);
-        if (text.trim()) return { text: text.slice(0, MAX_INDEX_CHARS), source: 'ocr', truncated: text.length > MAX_INDEX_CHARS, note: 'Scanned/image-only PDF OCR' };
+        if (text.trim()) return { text: text.slice(0, MAX_INDEX_CHARS), source: 'binary-text', truncated: text.length > MAX_INDEX_CHARS, note: 'Scanned/image-only PDF OCR' };
       }
     } else if (m.includes('wordprocessingml') || extension === 'docx') {
       text = await extractDocxText(buffer);
@@ -112,7 +112,7 @@ export async function extractDriveFileText(accessToken: string, fileId: string, 
       text = await extractXlsxText(buffer);
     } else if (IMAGE_MIMES.has(m) || IMAGE_EXTENSIONS.test(name || '')) {
       text = await ocrImage(buffer);
-      if (text.trim()) return { text: text.slice(0, MAX_INDEX_CHARS), source: 'ocr', truncated: text.length > MAX_INDEX_CHARS, note: 'Image OCR' };
+      if (text.trim()) return { text: text.slice(0, MAX_INDEX_CHARS), source: 'binary-text', truncated: text.length > MAX_INDEX_CHARS, note: 'Image OCR' };
     }
 
     if (!text.trim()) {
