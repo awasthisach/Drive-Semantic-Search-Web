@@ -24,15 +24,16 @@ export type BackoffOpts = {
   maxRetries?: number;
   baseMs?: number;
   label?: string;
-  /** Soft timeout per attempt (ms). Does not replace AbortSignal. */
+  /** Soft timeout per attempt (ms). Timeout failures are retried for safe reads. */
   timeoutMs?: number;
 };
 
 /**
- * fetch with exponential backoff on safe reads that receive 429 / explicitly
- * identified rate-limit 403. Mutating methods are returned without retry to
- * avoid duplicating resource creation after an ambiguous request outcome.
- * Pass AbortSignal via init.signal — aborted requests are not retried.
+ * Fetch with exponential backoff on safe reads that receive 429 / explicitly
+ * identified rate-limit 403, and on per-attempt timeouts. Mutating methods are
+ * returned without retry to avoid duplicating resource creation after an
+ * ambiguous request outcome. Pass AbortSignal via init.signal — caller aborts
+ * are never retried.
  */
 export async function fetchWithBackoff(
   input: RequestInfo | URL,
@@ -50,6 +51,7 @@ export async function fetchWithBackoff(
 
     let attemptInit = init;
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    let timedOut = false;
     if (opts.timeoutMs && opts.timeoutMs > 0) {
       const ctrl = new AbortController();
       const parent = init?.signal;
@@ -57,7 +59,10 @@ export async function fetchWithBackoff(
         if (parent.aborted) throw new DOMException('The operation was aborted.', 'AbortError');
         parent.addEventListener('abort', () => ctrl.abort(), { once: true });
       }
-      timeoutId = setTimeout(() => ctrl.abort(), opts.timeoutMs);
+      timeoutId = setTimeout(() => {
+        timedOut = true;
+        ctrl.abort();
+      }, opts.timeoutMs);
       attemptInit = { ...init, signal: ctrl.signal };
     }
 
@@ -80,6 +85,16 @@ export async function fetchWithBackoff(
       waitMs = Math.min(waitMs, 60_000);
       console.warn(
         `[rateLimit] ${opts.label || 'Drive API'} ${res.status}, retry ${attempt + 1}/${maxRetries} in ${waitMs}ms`
+      );
+      await sleep(waitMs);
+    } catch (error) {
+      if (!timedOut || attempt === maxRetries) throw error;
+      const waitMs = Math.min(
+        Math.round(baseMs * Math.pow(2, attempt) * (0.75 + Math.random() * 0.5)),
+        60_000
+      );
+      console.warn(
+        `[rateLimit] ${opts.label || 'Drive API'} timeout, retry ${attempt + 1}/${maxRetries} in ${waitMs}ms`
       );
       await sleep(waitMs);
     } finally {
