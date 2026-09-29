@@ -19,21 +19,25 @@ describe('extractDriveFileText truncation metadata', () => {
   });
 });
 
-describe('binary document extraction support', () => {
+describe('binary document and OCR support', () => {
   it('recognizes supported MIME types', () => {
     expect(canExtractText('application/pdf', 'report.pdf')).toBe(true);
     expect(canExtractText('application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'report.docx')).toBe(true);
     expect(canExtractText('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'report.xlsx')).toBe(true);
+    expect(canExtractText('image/png', 'scan.png')).toBe(true);
+    expect(canExtractText('image/jpeg', 'scan.jpg')).toBe(true);
   });
 
   it('recognizes supported extensions even when Drive MIME metadata is generic', () => {
     expect(canExtractText('application/octet-stream', 'report.pdf')).toBe(true);
     expect(canExtractText('application/octet-stream', 'report.docx')).toBe(true);
     expect(canExtractText('application/octet-stream', 'report.xlsx')).toBe(true);
+    expect(canExtractText('application/octet-stream', 'scan.png')).toBe(true);
+    expect(canExtractText('application/octet-stream', 'scan.jpeg')).toBe(true);
   });
 
   it('does not mark unrelated binary files as text-extractable', () => {
-    expect(canExtractText('application/octet-stream', 'photo.jpg')).toBe(false);
+    expect(canExtractText('application/octet-stream', 'photo.zip')).toBe(false);
     expect(canExtractText('application/zip', 'archive.zip')).toBe(false);
   });
 });
