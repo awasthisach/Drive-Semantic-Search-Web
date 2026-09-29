@@ -1,6 +1,6 @@
 /** Lightweight browser-side extraction for common PDF/DOCX/XLSX files.
  * No server upload: binaries are downloaded from Drive and parsed locally.
- * Scanned/image-only PDFs still require OCR and are reported as empty text.
+ * Scanned/image-only PDFs are handled by the local OCR fallback in ocrExtract.ts.
  */
 
 const MAX_ZIP_ENTRIES = 2_000;
@@ -75,16 +75,26 @@ async function readZipEntries(buffer: ArrayBuffer): Promise<Map<string, Uint8Arr
   return out;
 }
 
+function decodeXmlEntities(value: string): string {
+  return value.replace(/&(#x[0-9a-f]+|#\d+|amp|lt|gt|quot|apos);/gi, (_, entity: string) => {
+    const lower = entity.toLowerCase();
+    if (lower === 'amp') return '&';
+    if (lower === 'lt') return '<';
+    if (lower === 'gt') return '>';
+    if (lower === 'quot') return '"';
+    if (lower === 'apos') return "'";
+    if (lower.startsWith('#x')) return String.fromCodePoint(parseInt(lower.slice(2), 16));
+    if (lower.startsWith('#')) return String.fromCodePoint(Number(lower.slice(1)));
+    return _;
+  });
+}
+
 function xmlText(xml: string): string {
-  return xml
+  return decodeXmlEntities(xml)
     .replace(/<w:tab\s*\/?>/gi, '\t')
     .replace(/<w:br\s*\/?>/gi, '\n')
     .replace(/<\/w:p\s*>/gi, '\n')
     .replace(/<[^>]+>/g, ' ')
-    .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"').replace(/&apos;/g, "'")
-    .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
-    .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(parseInt(n, 16)))
     .replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n')
     .trim();
 }
@@ -97,10 +107,7 @@ export async function extractDocxText(buffer: ArrayBuffer): Promise<string> {
 }
 
 function decodeXml(s: string): string {
-  return s.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"').replace(/&apos;/g, "'")
-    .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
-    .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(parseInt(n, 16)));
+  return decodeXmlEntities(s);
 }
 
 export async function extractXlsxText(buffer: ArrayBuffer): Promise<string> {
@@ -156,7 +163,7 @@ function pdfLiteralToText(s: string): string {
     i++;
     if (i >= s.length) break;
     const c = s[i];
-    if (c === 'n') out += '\n'; else if (c === 'r') out += '\n'; else if (c === 't') out += '\t';
+    if (c === 'n' || c === 'r') out += '\n'; else if (c === 't') out += '\t';
     else if (c === 'b') out += '\b'; else if (c === 'f') out += '\f'; else out += c;
   }
   return out;
