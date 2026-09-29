@@ -4,6 +4,7 @@
 
 import { fetchWithBackoff } from './rateLimit';
 import { MAX_INDEX_CHARS } from './contentIndex';
+import { extractDocxText, extractPdfText, extractXlsxText } from './binaryOfficeExtract';
 
 const TEXTISH = [
   'text/plain',
@@ -14,6 +15,13 @@ const TEXTISH = [
   'application/xml',
   'text/xml',
 ];
+
+const BINARY_EXTENSIONS = /\.(pdf|docx|xlsx)$/i;
+const BINARY_MIMES = new Set([
+  'application/pdf',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+]);
 
 export interface ExtractResult {
   text: string;
@@ -29,7 +37,9 @@ export function canExtractText(mimeType: string, name: string): boolean {
   if (m === 'application/vnd.google-apps.document') return true;
   if (m === 'application/vnd.google-apps.spreadsheet') return true;
   if (m === 'application/vnd.google-apps.presentation') return true;
+  if (BINARY_MIMES.has(m)) return true;
   if (/\.(txt|md|csv|json|xml|html|log)$/i.test(name || '')) return true;
+  if (BINARY_EXTENSIONS.test(name || '')) return true;
   return false;
 }
 
@@ -72,6 +82,12 @@ async function driveFetch(url: string, accessToken: string, label: string): Prom
   );
 }
 
+async function readBinaryCapped(res: Response): Promise<{ buffer: ArrayBuffer; truncated: boolean }> {
+  const buffer = await res.arrayBuffer();
+  if (buffer.byteLength <= MAX_INDEX_CHARS * 4) return { buffer, truncated: false };
+  return { buffer: buffer.slice(0, MAX_INDEX_CHARS * 4), truncated: true };
+}
+
 export async function extractDriveFileText(
   accessToken: string,
   fileId: string,
@@ -79,6 +95,7 @@ export async function extractDriveFileText(
   name: string
 ): Promise<ExtractResult> {
   const m = mimeType || '';
+  const extension = /\.([^.]+)$/i.exec(name || '')?.[1]?.toLowerCase() || '';
 
   if (m === 'application/vnd.google-apps.document') {
     const res = await driveFetch(
@@ -108,6 +125,27 @@ export async function extractDriveFileText(
     );
     if (!res.ok) throw new Error('Slides export failed: ' + res.status);
     return { ...(await readTextCapped(res)), source: 'export', note: 'Slides text export' };
+  }
+
+  if (BINARY_MIMES.has(m) || BINARY_EXTENSIONS.test(name || '')) {
+    const res = await driveFetch(
+      `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true`,
+      accessToken,
+      `${extension || 'binary'}-extract`
+    );
+    if (!res.ok) throw new Error('Binary media download failed: ' + res.status);
+    const { buffer, truncated } = await readBinaryCapped(res);
+    let text = '';
+    if (m === 'application/pdf' || extension === 'pdf') text = await extractPdfText(buffer);
+    else if (m.includes('wordprocessingml') || extension === 'docx') text = await extractDocxText(buffer);
+    else if (m.includes('spreadsheetml') || extension === 'xlsx') text = await extractXlsxText(buffer);
+    if (!text.trim()) {
+      const note = extension === 'pdf' || m === 'application/pdf'
+        ? 'PDF contains no extractable text; scanned/image-only PDF may require OCR.'
+        : 'No extractable text found in binary document.';
+      return { text: '', source: 'binary-text', truncated, note };
+    }
+    return { text: text.slice(0, MAX_INDEX_CHARS), source: 'binary-text', truncated: truncated || text.length > MAX_INDEX_CHARS };
   }
 
   if (m.startsWith('text/') || TEXTISH.includes(m) || /\.(txt|md|csv|json|xml|html|log)$/i.test(name || '')) {
