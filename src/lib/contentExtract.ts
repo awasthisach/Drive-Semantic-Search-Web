@@ -22,6 +22,7 @@ const BINARY_MIMES = new Set([
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
 ]);
+const MAX_BINARY_BYTES = 50 * 1024 * 1024;
 
 export interface ExtractResult {
   text: string;
@@ -63,11 +64,7 @@ async function readTextCapped(
     if (text.length >= maxChars) {
       text = text.slice(0, maxChars);
       truncated = true;
-      try {
-        await reader.cancel();
-      } catch {
-        /* ignore */
-      }
+      try { await reader.cancel(); } catch { /* ignore */ }
       break;
     }
   }
@@ -84,8 +81,8 @@ async function driveFetch(url: string, accessToken: string, label: string): Prom
 
 async function readBinaryCapped(res: Response): Promise<{ buffer: ArrayBuffer; truncated: boolean }> {
   const buffer = await res.arrayBuffer();
-  if (buffer.byteLength <= MAX_INDEX_CHARS * 4) return { buffer, truncated: false };
-  return { buffer: buffer.slice(0, MAX_INDEX_CHARS * 4), truncated: true };
+  if (buffer.byteLength <= MAX_BINARY_BYTES) return { buffer, truncated: false };
+  throw new Error(`Binary file exceeds ${MAX_BINARY_BYTES / (1024 * 1024)} MB extraction limit`);
 }
 
 export async function extractDriveFileText(
