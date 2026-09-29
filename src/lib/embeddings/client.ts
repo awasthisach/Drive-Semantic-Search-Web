@@ -65,7 +65,7 @@ export class BackendEmbeddingProvider implements EmbeddingProvider {
       if (!token) throw new EmbedAuthError('Sign in required to generate embeddings');
 
       const controller = new AbortController();
-      const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
+      const timeout = globalThis.setTimeout(() => controller.abort(), timeoutMs);
       try {
         const res = await fetch(EMBED_CONFIG.endpoint, {
           method: 'POST',
@@ -118,7 +118,7 @@ export class BackendEmbeddingProvider implements EmbeddingProvider {
         console.warn(`[embedding] timeout/network error, retry ${attempt + 1}/${maxRetries} in ${waitMs}ms`);
         await sleep(waitMs);
       } finally {
-        window.clearTimeout(timeout);
+        globalThis.clearTimeout(timeout);
       }
     }
 
