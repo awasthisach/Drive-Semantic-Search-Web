@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   Search, Sparkles, Loader2, Database, FolderInput, Star, Pin, Link2,
 } from 'lucide-react';
@@ -18,6 +18,7 @@ import { embedAndStoreChunks, hasCompatibleVectorSet, warmAnnIndex } from '../li
 import { isEmbedConfigured } from '../lib/embeddings/config';
 import { createEmbeddingProvider } from '../lib/embeddings/client';
 import { getFirebaseIdToken } from '../lib/firebaseAuth';
+import { paginateResults } from '../lib/pagination';
 
 interface SemanticSearchProps {
   files: DriveFile[];
@@ -45,6 +46,7 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
   const [query, setQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [results, setResults] = useState<SemanticSearchResult[]>([]);
+  const [currentPage, setCurrentPage] = useState(1);
   const [searching, setSearching] = useState(false);
   const [indexedCount, setIndexedCount] = useState(0);
   const [indexing, setIndexing] = useState(false);
@@ -53,6 +55,10 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
   const [resumeFrom, setResumeFrom] = useState(0);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const cancelIndexRef = useRef(false);
+  const paginatedResults = useMemo(
+    () => paginateResults(results, currentPage),
+    [results, currentPage]
+  );
   const CURSOR_KEY = 'content-index-cursor';
 
   const buildIndexSignature = async (
@@ -150,6 +156,7 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
   useEffect(() => {
     let cancelled = false;
     const handle = window.setTimeout(async () => {
+      setCurrentPage(1);
       setSearching(true);
       try {
         const r = await runHybridSearch(
@@ -411,7 +418,7 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
             <p className="text-sm text-zinc-500 text-center py-8">No matches. Broaden the query.</p>
           )
         )}
-        {!searching && results.map(r => (
+        {!searching && paginatedResults.items.map(r => (
           <div
             key={r.file.id}
             className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3 space-y-2"
@@ -449,6 +456,32 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
             )}
           </div>
         ))}
+        {!searching && paginatedResults.total > 0 && paginatedResults.pageCount > 1 && (
+          <div className="flex flex-wrap items-center justify-between gap-2 pt-2 text-xs text-zinc-500">
+            <span>
+              Showing {paginatedResults.start}–{paginatedResults.end} of {paginatedResults.total}
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                disabled={paginatedResults.page === 1}
+                onClick={() => setCurrentPage(page => Math.max(1, page - 1))}
+                className="rounded-lg border px-2.5 py-1.5 font-semibold disabled:opacity-40"
+              >
+                Previous
+              </button>
+              <span aria-live="polite">Page {paginatedResults.page} of {paginatedResults.pageCount}</span>
+              <button
+                type="button"
+                disabled={paginatedResults.page === paginatedResults.pageCount}
+                onClick={() => setCurrentPage(page => Math.min(paginatedResults.pageCount, page + 1))}
+                className="rounded-lg border px-2.5 py-1.5 font-semibold disabled:opacity-40"
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
