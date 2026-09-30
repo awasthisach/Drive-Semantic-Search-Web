@@ -54,6 +54,9 @@ jobs:
           VITE_EMBED_ENDPOINT: ${{ secrets.VITE_EMBED_ENDPOINT || 'https://drive-semantic-embed.awasthi-sach.workers.dev' }}
         run: npm run build
 
+      - name: Verify production asset graph
+        run: npm run check:dist
+
       - name: Bundle size budget
         run: npm run check:bundle
 
@@ -168,3 +171,8 @@ jobs:
           done
           echo "Live Pages smoke check failed: expected app title not found at $PAGE_URL"
           exit 1
+
+      - name: Verify every live JavaScript module reference
+        env:
+          PAGE_URL: ${{ needs.deploy-pages.outputs.page_url }}
+        run: node scripts/verify-live-pages.mjs "$PAGE_URL"

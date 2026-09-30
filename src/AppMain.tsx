@@ -5,6 +5,7 @@ import { Dashboard } from './components/Dashboard';
 import { OfflineIndicator } from './components/OfflineIndicator';
 import { MoveToFolderModal } from './components/MoveToFolderModal';
 import { AuthErrorModal } from './components/AuthErrorModal';
+import { SemanticSearch } from './components/SemanticSearch';
 import { useDriveApp } from './hooks/useDriveApp';
 import { downloadDiagnostics } from './lib/diagnostics';
 
@@ -16,9 +17,6 @@ const PrivacyVault = React.lazy(() =>
 );
 const DuplicateFinder = React.lazy(() =>
   import('./components/DuplicateFinder').then(m => ({ default: m.DuplicateFinder }))
-);
-const SemanticSearch = React.lazy(() =>
-  import('./components/SemanticSearch').then(m => ({ default: m.SemanticSearch }))
 );
 const OfflineFilesList = React.lazy(() =>
   import('./components/OfflineFilesList').then(m => ({ default: m.OfflineFilesList }))

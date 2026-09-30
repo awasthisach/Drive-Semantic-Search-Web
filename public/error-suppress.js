@@ -8,7 +8,9 @@ function recoverFromStaleChunk(message) {
     var previous = Number(sessionStorage.getItem(key) || 0);
     if (Date.now() - previous < 60000) return;
     sessionStorage.setItem(key, String(Date.now()));
-    window.location.reload();
+    var url = new URL(window.location.href);
+    url.searchParams.set('_chunk_reload', String(Date.now()));
+    window.location.replace(url.href);
   } catch (_) {
     /* Private browsing can deny sessionStorage; never block the app. */
   }
