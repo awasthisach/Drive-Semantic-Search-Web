@@ -1,1 +1,354 @@
-PLACEHOLDER
+import React, { useMemo, useState } from 'react';
+import { Copy, Trash2, CheckCircle, Check, FileText, FolderInput, Sparkles, Loader2 } from 'lucide-react';
+import { DriveFile } from '../types';
+import { findDuplicates, findSemanticDuplicatesFromVectors, SemanticDuplicateGroup } from '../lib/duplicateEngine';
+import { countVectors, listVectors } from '../lib/vectorIndex';
+import { MoveToFolderModal } from './MoveToFolderModal';
+import { formatBytes } from '../lib/driveApi';
+
+interface DuplicateFinderProps {
+  files: DriveFile[];
+  folders: import('../types').FolderItem[];
+  corpusKey: string;
+  onRemoveFiles: (ids: string[]) => void;
+  onMoveFiles: (ids: string[], folderId: string | undefined) => void;
+  onCreateFolder: (folder: import('../types').FolderItem) => void;
+  onVerifyHashes?: (fileIds: string[]) => Promise<void>;
+  verifyBusy?: boolean;
+}
+
+const SEMANTIC_THRESHOLDS = [
+  { value: 0.85, label: '85%', name: 'Broad', help: 'More related files; review carefully.' },
+  { value: 0.9, label: '90%', name: 'Balanced', help: 'Recommended starting point.' },
+  { value: 0.95, label: '95%', name: 'Strict', help: 'Only very similar content.' },
+] as const;
+
+export const DuplicateFinder: React.FC<DuplicateFinderProps> = ({ files, folders, corpusKey, onRemoveFiles, onMoveFiles, onCreateFolder, onVerifyHashes, verifyBusy }) => {
+  const [selectedDuplicates, setSelectedDuplicates] = useState<Set<string>>(() => new Set());
+  const [selectedForMove, setSelectedForMove] = useState<Set<string>>(() => new Set());
+  const [showMoveModal, setShowMoveModal] = useState(false);
+  const [semanticGroups, setSemanticGroups] = useState<SemanticDuplicateGroup[]>([]);
+  const [semanticThreshold, setSemanticThreshold] = useState(0.9);
+  const [semanticBusy, setSemanticBusy] = useState(false);
+  const [semanticStatus, setSemanticStatus] = useState('');
+  const [actionStatus, setActionStatus] = useState('');
+  const [indexedVectorCount, setIndexedVectorCount] = useState(0);
+  const duplicateGroups = findDuplicates(files);
+  const totalReclaimable = duplicateGroups.reduce((acc, group) => acc + group.reclaimableSize, 0);
+  const selectedMoveFiles = useMemo(() => files.filter(file => selectedForMove.has(file.id)), [files, selectedForMove]);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    void countVectors(corpusKey).then(count => {
+      if (!cancelled) setIndexedVectorCount(count);
+    });
+    return () => { cancelled = true; };
+  }, [corpusKey]);
+
+  React.useEffect(() => {
+    const liveIds = new Set(files.map(file => file.id));
+    setSelectedForMove(previous => {
+      const next = new Set([...previous].filter(id => liveIds.has(id)));
+      return next.size === previous.size ? previous : next;
+    });
+    setSelectedDuplicates(previous => {
+      const next = new Set([...previous].filter(id => liveIds.has(id)));
+      return next.size === previous.size ? previous : next;
+    });
+  }, [files]);
+
+  const toggleMove = (id: string) => {
+    setSelectedForMove(previous => {
+      const next = new Set(previous);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const findSemanticNearDuplicates = async () => {
+    if (!indexedVectorCount) {
+      setSemanticStatus('No indexed embeddings found. Open Search and index extractable content first.');
+      return;
+    }
+    setSemanticBusy(true);
+    setSemanticStatus('Comparing indexed file profiles…');
+    try {
+      const vectors = await listVectors(corpusKey);
+      const groups = findSemanticDuplicatesFromVectors(files, vectors, semanticThreshold);
+      setSemanticGroups(groups);
+      setSemanticStatus(groups.length
+        ? `${groups.length} group(s) found at ${Math.round(semanticThreshold * 100)}%. Review files before moving.`
+        : `No near-duplicate groups found at ${Math.round(semanticThreshold * 100)}%. Try 85% for a broader review.`);
+    } catch (error) {
+      console.warn('[DuplicateFinder] semantic duplicate scan failed', error);
+      setSemanticGroups([]);
+      setSemanticStatus('Semantic scan unavailable; index content first.');
+    } finally {
+      setSemanticBusy(false);
+    }
+  };
+
+  const handleThresholdChange = (value: number) => {
+    setSemanticThreshold(value);
+    setSemanticGroups([]);
+    setSemanticStatus('Threshold changed. Scan again to refresh results.');
+  };
+
+  const selectSemanticGroup = (group: SemanticDuplicateGroup) => {
+    setSelectedForMove(previous => {
+      const next = new Set(previous);
+      group.files.slice(1).forEach(file => next.add(file.id));
+      return next;
+    });
+  };
+
+  const selectAllMoveCandidates = () => {
+    const ids = duplicateGroups.flatMap(group => group.files.slice(1).map(file => file.id));
+    const semanticIds = semanticGroups.flatMap(group => group.files.slice(1).map(file => file.id));
+    const next = new Set([...ids, ...semanticIds]);
+    setSelectedForMove(next);
+    setActionStatus(next.size
+      ? `Selected ${next.size} non-primary file(s) for move. Click “Move selected”.`
+      : 'No non-primary candidates to move.');
+  };
+
+  const toggleMoveChecked = (id: string) => toggleMove(id);
+
+  const confirmedIds = new Set(
+    duplicateGroups
+      .filter(g => g.hash.startsWith('sha256:'))
+      .flatMap(g => g.files.map(f => f.id))
+  );
+
+  const toggleSelect = (id: string) => {
+    if (!confirmedIds.has(id)) return;
+    const next = new Set(selectedDuplicates);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setSelectedDuplicates(next);
+  };
+
+  const handleSelectAllDuplicates = () => {
+    const next = new Set<string>();
+    duplicateGroups.forEach(group => {
+      if (!group.hash.startsWith('sha256:')) return;
+      group.files.slice(1).forEach(f => next.add(f.id));
+    });
+    setSelectedDuplicates(next);
+    if (next.size === 0) {
+      setActionStatus('Trash stays locked until SHA-256 verify. Use “Verify candidates (SHA-256)” first (needs real Google Drive sign-in, not Demo).');
+    } else {
+      setActionStatus(`Selected ${next.size} verified non-primary file(s) for trash.`);
+    }
+  };
+
+  const handleDeselectAll = () => {
+    setSelectedDuplicates(new Set());
+    setSelectedForMove(new Set());
+    setActionStatus('Selection cleared.');
+  };
+
+  const handleCleanSelected = () => {
+    const safe = Array.from(selectedDuplicates).filter(id => confirmedIds.has(id));
+    if (safe.length === 0) return;
+    onRemoveFiles(safe);
+    setSelectedDuplicates(new Set());
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="rounded-2xl p-5 sm:p-6 bg-gradient-to-br from-indigo-950/80 via-zinc-900 to-zinc-950 text-white border border-indigo-900/30 shadow-md">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-start sm:items-center gap-3.5">
+            <div className="p-3 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 shrink-0">
+              <Copy className="w-6 h-6" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h2 className="text-lg sm:text-xl font-bold tracking-tight">Duplicate Candidate Cleaner</h2>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                  Size/name · sha256 when verified
+                </span>
+              </div>
+              <p className="text-xs sm:text-sm text-zinc-400 mt-1 max-w-xl">
+                Trash locked until SHA-256 verify. Use Verify candidates to hash Drive files (download/export).
+              </p>
+            </div>
+          </div>
+          <div className="text-right">
+            <p className="text-[11px] text-zinc-400 uppercase tracking-wider font-semibold">Candidate reclaim*</p>
+            <p className="text-base sm:text-xl font-bold text-emerald-400 font-mono">{formatBytes(totalReclaimable)}</p>
+            <p className="text-[10px] text-zinc-500 mt-0.5">*Real only after SHA-256 confirm</p>
+          </div>
+        </div>
+      </div>
+
+      {duplicateGroups.length === 0 && semanticGroups.length === 0 ? (
+        <div className="text-center py-12 rounded-2xl border border-dashed border-zinc-300 dark:border-zinc-800 space-y-3">
+          <CheckCircle className="w-12 h-12 text-emerald-500 mx-auto" />
+          <h3 className="text-base font-bold">No exact candidate groups</h3>
+          <p className="text-xs text-zinc-500 mt-1">You can still scan indexed embeddings for semantic near-duplicates.</p>
+          <div className="flex items-center justify-center gap-2">
+            <div className="flex gap-1" role="group" aria-label="Semantic similarity threshold">
+              {SEMANTIC_THRESHOLDS.map(option => <button key={option.value} type="button" onClick={() => handleThresholdChange(option.value)} aria-pressed={semanticThreshold === option.value} title={`${option.name}: ${option.help}`} className={`px-2 py-1.5 rounded-lg border text-[11px] font-semibold ${semanticThreshold === option.value ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white dark:bg-zinc-900 border-zinc-300 dark:border-zinc-700'}`}>{option.label}</button>)}
+            </div>
+            <button type="button" onClick={() => void findSemanticNearDuplicates()} disabled={semanticBusy} className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-bold disabled:opacity-50">
+              {semanticBusy && <Loader2 className="w-3.5 h-3.5 animate-spin" />} {semanticBusy ? 'Scanning…' : 'Find semantic duplicates'}
+            </button>
+          </div>
+          <p className="text-[11px] text-zinc-500">{indexedVectorCount ? `${indexedVectorCount} indexed embedding vector(s) available.` : 'Index extractable content from Search before scanning.'}</p>
+          {semanticStatus && <p className="text-[11px] text-zinc-500" role="status">{semanticStatus}</p>}
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white dark:bg-zinc-900 p-4 rounded-2xl border border-zinc-200 dark:border-zinc-800">
+            <div className="flex items-center gap-2 flex-wrap text-xs">
+              <span className="font-semibold">{duplicateGroups.length} exact/candidate group(s)</span>
+              <button type="button" onClick={selectAllMoveCandidates} className="text-blue-600 hover:underline font-medium">
+                Select non-primary for move
+              </button>
+              <button type="button" onClick={handleSelectAllDuplicates} className="text-indigo-600 hover:underline font-medium">
+                Select non-primary for trash
+              </button>
+              <button type="button" onClick={handleDeselectAll} className="text-zinc-500 hover:underline">
+                Clear selection
+              </button>
+              {onVerifyHashes && (
+                <button
+                  type="button"
+                  disabled={verifyBusy}
+                  onClick={() => {
+                    const ids = duplicateGroups
+                      .filter(g => !g.hash.startsWith('sha256:'))
+                      .flatMap(g => g.files.map(f => f.id));
+                    if (!ids.length) {
+                      setActionStatus('All candidate groups are already SHA-256 verified (or none pending).');
+                      return;
+                    }
+                    setActionStatus('Verifying SHA-256… Demo Drive cannot download real bytes — sign in with Google for hash verify. Trash stays locked until hashes succeed.');
+                    onVerifyHashes(ids);
+                  }}
+                  className="text-emerald-600 hover:underline font-medium disabled:opacity-50"
+                >
+                  {verifyBusy ? 'Verifying SHA-256…' : 'Verify candidates (SHA-256)'}
+                </button>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <button type="button" disabled={selectedForMove.size === 0} onClick={() => setShowMoveModal(true)} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-blue-600 text-white text-xs font-bold disabled:opacity-40">
+                <FolderInput className="w-3.5 h-3.5" /> Move selected ({selectedForMove.size})
+              </button>
+              <button type="button" disabled={selectedDuplicates.size === 0} onClick={handleCleanSelected} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-red-600 text-white text-xs font-bold disabled:opacity-40" title="Trash only after SHA-256 verify">
+                <Trash2 className="w-3.5 h-3.5" /> Trash verified ({selectedDuplicates.size})
+              </button>
+            </div>
+          </div>
+          {actionStatus && (
+            <p className="text-[11px] text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 rounded-xl px-3 py-2" role="status">
+              {actionStatus}
+            </p>
+          )}
+
+          <div className="rounded-2xl border border-indigo-200 dark:border-indigo-900/50 bg-indigo-50/50 dark:bg-indigo-950/20 p-4 space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2 text-sm font-bold"><Sparkles className="w-4 h-4 text-indigo-500" /> Semantic near-duplicate review</div>
+                <p className="text-[11px] text-zinc-500 mt-1">Uses indexed embeddings to find similar content. Similar is not proof of duplication; trash stays locked to SHA-256.</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] text-zinc-500">Similarity</span>
+                <div className="flex gap-1" role="group" aria-label="Semantic similarity threshold">
+                  {SEMANTIC_THRESHOLDS.map(option => <button key={option.value} type="button" onClick={() => handleThresholdChange(option.value)} aria-pressed={semanticThreshold === option.value} title={`${option.name}: ${option.help}`} className={`px-2 py-1.5 rounded-lg border text-[11px] font-semibold ${semanticThreshold === option.value ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white dark:bg-zinc-900 border-zinc-300 dark:border-zinc-700'}`}>{option.label}</button>)}
+                </div>
+                <button type="button" onClick={() => void findSemanticNearDuplicates()} disabled={semanticBusy} className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-bold disabled:opacity-50">
+                  {semanticBusy && <Loader2 className="w-3.5 h-3.5 animate-spin" />} {semanticBusy ? 'Scanning…' : 'Find similar files'}
+                </button>
+              </div>
+            </div>
+            <p className="text-[11px] text-zinc-500">{indexedVectorCount ? `${indexedVectorCount} indexed embedding vector(s) available.` : 'Index extractable content from Search before scanning.'}</p>
+            {semanticStatus && <p className="text-[11px] text-zinc-600 dark:text-zinc-400" role="status">{semanticStatus}</p>}
+            {semanticGroups.map((group, index) => (
+              <div key={`${index}-${group.files.map(file => file.id).join('-')}`} className="rounded-xl border border-indigo-200/70 dark:border-indigo-900/60 bg-white/70 dark:bg-zinc-900/60 p-3">
+                <div className="flex items-center justify-between gap-2 mb-2"><span className="text-xs font-bold text-indigo-700 dark:text-indigo-300" title="Strongest direct pair in this connected group. Some members may be linked indirectly; review before acting.">Best pair similarity {Math.round(group.bestPairSimilarity * 100)}%</span><button type="button" onClick={() => selectSemanticGroup(group)} className="text-[11px] text-indigo-600 hover:underline">Select non-primary for move</button></div>
+                <div className="space-y-1">{group.files.map(file => <label key={file.id} className="flex items-center gap-2 text-xs"><input type="checkbox" checked={selectedForMove.has(file.id)} onChange={() => toggleMove(file.id)} /><span className="truncate">{file.name}</span></label>)}</div>
+              </div>
+            ))}
+          </div>
+
+          {duplicateGroups.map(group => {
+            const confirmed = group.verification === 'sha256';
+            return (
+              <div
+                key={group.hash}
+                className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 overflow-hidden"
+              >
+                <div className="px-4 py-2.5 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between gap-2 text-xs">
+                  <span className={`font-bold ${confirmed ? 'text-emerald-600' : 'text-amber-600'}`}>
+                    {confirmed ? 'confirmed SHA-256' : 'candidate (size + name) — trash locked'}
+                  </span>
+                  <div className="flex items-center gap-2">
+                    {!confirmed && onVerifyHashes && (
+                      <button
+                        type="button"
+                        disabled={verifyBusy}
+                        className="text-[10px] font-bold text-emerald-600 hover:underline disabled:opacity-50"
+                        onClick={() => {
+                          setActionStatus('Verifying group SHA-256… Real Google Drive sign-in required. Trash stays locked until success.');
+                          onVerifyHashes(group.files.map(f => f.id));
+                        }}
+                      >
+                        Verify group
+                      </button>
+                    )}
+                    <span className="text-zinc-500">{group.fileCount} files · reclaim ~{formatBytes(group.reclaimableSize)}</span>
+                  </div>
+                </div>
+                <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                  {group.files.map((file, idx) => (
+                    <li key={file.id} className="flex items-center gap-3 px-4 py-3">
+                      <button type="button" onClick={() => toggleMoveChecked(file.id)} className="shrink-0" title="Select for move">
+                        {selectedForMove.has(file.id) ? <Check className="w-4 h-4 text-blue-600" /> : <span className="w-4 h-4 inline-block rounded border border-zinc-300 dark:border-zinc-600" />}
+                      </button>
+                      {confirmed ? (
+                        <button type="button" onClick={() => toggleSelect(file.id)} className="shrink-0" title="Select for trash">
+                          {selectedDuplicates.has(file.id) ? <Trash2 className="w-3.5 h-3.5 text-red-600" /> : <span className="w-3.5 h-3.5 inline-block rounded border border-dashed border-red-300 dark:border-red-700" />}
+                        </button>
+                      ) : (
+                        <span className="w-3.5 h-3.5 inline-block rounded border border-dashed border-zinc-300 dark:border-zinc-600 opacity-40 shrink-0" title="Verify SHA-256 before trash" />
+                      )}
+                      <FileText className="w-4 h-4 text-zinc-400 shrink-0" />
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-semibold truncate">{file.name}</div>
+                        <div className="text-[11px] text-zinc-500">
+                          {formatBytes(file.size)} · {new Date(file.modifiedTime).toLocaleDateString()}
+                        </div>
+                      </div>
+                      {idx === 0 && (
+                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300">
+                          Primary (review)
+                        </span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      <MoveToFolderModal
+        isOpen={showMoveModal}
+        onClose={() => setShowMoveModal(false)}
+        selectedFiles={selectedMoveFiles}
+        folders={folders}
+        allFiles={files}
+        onConfirmMove={folderId => {
+          onMoveFiles(selectedMoveFiles.map(file => file.id), folderId);
+          setSelectedForMove(new Set());
+          setShowMoveModal(false);
+        }}
+        onCreateFolder={onCreateFolder}
+      />
+    </div>
+  );
+};
