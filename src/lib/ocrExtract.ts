@@ -14,7 +14,20 @@ const TESS_WORKER_PATH = `https://cdn.jsdelivr.net/npm/tesseract.js@${TESSERACT_
 const TESS_CORE_PATH = 'https://cdn.jsdelivr.net/npm/tesseract.js-core@4.0.4/tesseract-core.wasm.js';
 const PDFJS_WORKER_PATH = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${PDFJS_VERSION}/build/pdf.worker.min.js`;
 
-function loadScript(src: string): Promise<void> {
+/** Thrown when the caller aborts extraction (Cancel / timeout). */
+export class OcrAbortedError extends Error {
+  constructor(message = 'OCR aborted') {
+    super(message);
+    this.name = 'OcrAbortedError';
+  }
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw new OcrAbortedError();
+}
+
+function loadScript(src: string, signal?: AbortSignal): Promise<void> {
+  throwIfAborted(signal);
   return new Promise((resolve, reject) => {
     const existing = document.querySelector<HTMLScriptElement>(`script[data-ocr-src="${src}"]`);
     if (existing) {
@@ -32,18 +45,26 @@ function loadScript(src: string): Promise<void> {
     script.onload = () => { (script as any).__loaded = true; resolve(); };
     script.onerror = () => reject(new Error(`Failed to load OCR dependency: ${src}`));
     document.head.appendChild(script);
+    if (signal) {
+      const onAbort = () => reject(new OcrAbortedError());
+      signal.addEventListener('abort', onAbort, { once: true });
+    }
   });
 }
 
-async function ensureOcr(): Promise<void> {
-  if (!window.Tesseract) await loadScript(`https://cdn.jsdelivr.net/npm/tesseract.js@${TESSERACT_VERSION}/dist/tesseract.min.js`);
-  if (!window.pdfjsLib) await loadScript(`https://cdn.jsdelivr.net/npm/pdfjs-dist@${PDFJS_VERSION}/build/pdf.min.js`);
+async function ensureOcr(signal?: AbortSignal): Promise<void> {
+  throwIfAborted(signal);
+  if (!window.Tesseract) await loadScript(`https://cdn.jsdelivr.net/npm/tesseract.js@${TESSERACT_VERSION}/dist/tesseract.min.js`, signal);
+  throwIfAborted(signal);
+  if (!window.pdfjsLib) await loadScript(`https://cdn.jsdelivr.net/npm/pdfjs-dist@${PDFJS_VERSION}/build/pdf.min.js`, signal);
+  throwIfAborted(signal);
   if (!window.Tesseract || !window.pdfjsLib) throw new Error('OCR engine unavailable');
   window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_PATH;
 }
 
-async function createWorker(): Promise<any> {
-  await ensureOcr();
+async function createWorker(signal?: AbortSignal): Promise<any> {
+  await ensureOcr(signal);
+  throwIfAborted(signal);
   return window.Tesseract.createWorker('eng+hin', 1, {
     workerPath: TESS_WORKER_PATH,
     corePath: TESS_CORE_PATH,
@@ -51,27 +72,41 @@ async function createWorker(): Promise<any> {
   });
 }
 
-function canvasToBlob(canvas: HTMLCanvasElement): Promise<Blob> {
-  return new Promise((resolve, reject) => canvas.toBlob(b => b ? resolve(b) : reject(new Error('OCR canvas conversion failed')), 'image/png', 1));
+function canvasToBlob(canvas: HTMLCanvasElement, signal?: AbortSignal): Promise<Blob> {
+  throwIfAborted(signal);
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(b => {
+      if (signal?.aborted) {
+        reject(new OcrAbortedError());
+        return;
+      }
+      b ? resolve(b) : reject(new Error('OCR canvas conversion failed'));
+    }, 'image/png', 1);
+  });
 }
 
-export async function ocrImage(buffer: ArrayBuffer): Promise<string> {
-  const worker = await createWorker();
+export async function ocrImage(buffer: ArrayBuffer, signal?: AbortSignal): Promise<string> {
+  throwIfAborted(signal);
+  const worker = await createWorker(signal);
   try {
+    throwIfAborted(signal);
     const { data } = await worker.recognize(new Blob([buffer]));
+    throwIfAborted(signal);
     return String(data?.text || '').trim();
   } finally {
-    await worker.terminate();
+    await worker.terminate().catch(() => undefined);
   }
 }
 
-export async function ocrPdf(buffer: ArrayBuffer): Promise<string> {
-  await ensureOcr();
+export async function ocrPdf(buffer: ArrayBuffer, signal?: AbortSignal): Promise<string> {
+  await ensureOcr(signal);
+  throwIfAborted(signal);
   const pdf = await window.pdfjsLib.getDocument({ data: new Uint8Array(buffer) }).promise;
-  const worker = await createWorker();
+  const worker = await createWorker(signal);
   const pages: string[] = [];
   try {
     for (let pageNo = 1; pageNo <= pdf.numPages; pageNo++) {
+      throwIfAborted(signal);
       const page = await pdf.getPage(pageNo);
       const base = page.getViewport({ scale: 1 });
       const scale = Math.min(2, Math.max(1, 1800 / base.width));
@@ -82,7 +117,9 @@ export async function ocrPdf(buffer: ArrayBuffer): Promise<string> {
       const ctx = canvas.getContext('2d', { willReadFrequently: true });
       if (!ctx) throw new Error(`OCR canvas unavailable for PDF page ${pageNo}`);
       await page.render({ canvasContext: ctx, viewport }).promise;
-      const { data } = await worker.recognize(await canvasToBlob(canvas));
+      throwIfAborted(signal);
+      const { data } = await worker.recognize(await canvasToBlob(canvas, signal));
+      throwIfAborted(signal);
       const text = String(data?.text || '').trim();
       if (text) pages.push(`[Page ${pageNo}]\n${text}`);
       canvas.width = 1;
@@ -91,7 +128,7 @@ export async function ocrPdf(buffer: ArrayBuffer): Promise<string> {
     }
     return pages.join('\n\n').trim();
   } finally {
-    await worker.terminate();
+    await worker.terminate().catch(() => undefined);
     pdf.cleanup?.();
     pdf.destroy?.();
   }
