@@ -278,7 +278,16 @@ export function useDriveHandlersRest(s: DriveAppState) {
 
   const handleVerifyHashes = async (fileIds: string[]) => {
     const targets = files.filter(f => fileIds.includes(f.id) && f.isGoogleDriveItem);
-    if (!targets.length) return;
+    if (!targets.length) {
+      showDriveToast('No Google Drive files to verify');
+      return;
+    }
+
+    const tokenProbe = (await ensureValidToken()) || googleAccessToken || (await getAccessToken());
+    if (!tokenProbe) {
+      showDriveToast('Sign in with Google required for SHA-256 verify (Demo cannot hash remote bytes). Trash stays locked.');
+      return;
+    }
 
     setVerifyBusy(true);
     showDriveToast('Verifying SHA-256 for ' + targets.length + ' file(s)…');

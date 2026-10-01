@@ -125,7 +125,7 @@ async function tryNeuralSearch(
       onStatus?.('Neural search unavailable; showing BM25 and metadata matches.');
       return null;
     }
-    onStatus?.('Neural search active.');
+    onStatus?.(out.size ? 'Neural search active.' : 'Neural search ran; no vector hits — showing BM25 and metadata matches.');
     return out;
   } catch (e) {
     console.warn('[searchEngine] neural search failed; BM25/metadata only', e);
@@ -179,8 +179,9 @@ export async function runHybridSearch(
     }
   }
 
-  // neuralHits !== null means embed pipeline succeeded (may be empty map)
-  const neuralPipelineOk = neuralHits !== null;
+  // Use neural hybrid weights only when embed path produced at least one hit.
+  // Empty map would dilute BM25/meta under 0.55 neural weight.
+  const neuralPipelineOk = neuralHits !== null && neuralHits.size > 0;
 
   for (const id of candidateIds) {
     const file = fileById.get(id);
@@ -201,7 +202,6 @@ export async function runHybridSearch(
     const reasons: string[] = [...meta.reasons];
 
     if (neuralPipelineOk) {
-      // Always same hybrid formula when neural path ran — neuralN may be 0 for this file
       score = Math.round(
         HYBRID_WEIGHTS.neural * neuralN +
           HYBRID_WEIGHTS.bm25 * bm25N +
@@ -210,7 +210,6 @@ export async function runHybridSearch(
       if (neuralN > 0) reasons.unshift(`Semantic ${neuralN}`);
       if (bm25N > 0) reasons.push('Content body match');
     } else {
-      // Embed not configured / failed → BM25 + metadata only
       score = content
         ? Math.round(Math.min(100, metaN + Math.min(40, content.score * 8) * 0.5))
         : metaN;
@@ -219,11 +218,9 @@ export async function runHybridSearch(
 
     if (score <= 0) continue;
 
-    // Precision guard: exact filename/phrase matches should not be buried by
-    // a broad semantic hit. Keep this bounded until corpus-based evaluation.
     const normalizedQuery = query.toLowerCase().trim();
     const normalizedName = file.name.toLowerCase();
-    const normalizedStem = normalizedName.replace(/\\.[a-z0-9]{1,8}$/i, '');
+    const normalizedStem = normalizedName.replace(/\.[a-z0-9]{1,8}$/i, '');
     const exactName = normalizedName === normalizedQuery || normalizedStem === normalizedQuery;
     const phraseMatch = query.trim().length > 1 &&
       (normalizedName.includes(normalizedQuery) || (file.semanticSummary || '').toLowerCase().includes(normalizedQuery));
