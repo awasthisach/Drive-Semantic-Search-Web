@@ -66,13 +66,44 @@ function isTokenExpired(): boolean {
  * GIS token flow only yields a Drive access token; the embed Worker needs a
  * Firebase ID token, so exchange the Google credential for a Firebase session.
  */
-async function linkFirebaseSession(accessToken: string): Promise<User | null> {
-  if (auth.currentUser) return auth.currentUser;
+/**
+ * Link / refresh Firebase Auth from a Google access token.
+ * Verifies that any existing Firebase user matches the Google account (email)
+ * represented by this token; otherwise re-authenticates so Drive and embed
+ * identity stay aligned.
+ */
+async function linkFirebaseSession(
+  accessToken: string,
+  googleEmail?: string | null
+): Promise<User | null> {
+  const normalized = (googleEmail || '').trim().toLowerCase();
+  const current = auth.currentUser;
+  if (current) {
+    const currentEmail = (current.email || '').trim().toLowerCase();
+    if (!normalized || !currentEmail || currentEmail === normalized) {
+      return current;
+    }
+    console.warn(
+      '[firebaseAuth] Firebase user email mismatch with Drive account; re-linking',
+      { firebase: currentEmail, drive: normalized }
+    );
+    try {
+      await signOut(auth);
+    } catch {
+      /* ignore */
+    }
+  }
   try {
-    const result = await signInWithCredential(auth, GoogleAuthProvider.credential(null, accessToken));
+    const result = await signInWithCredential(
+      auth,
+      GoogleAuthProvider.credential(null, accessToken)
+    );
     return result.user;
   } catch (e) {
-    console.warn('[firebaseAuth] Firebase session link skipped (neural search will be unavailable):', e);
+    console.warn(
+      '[firebaseAuth] Firebase session link skipped (neural search will be unavailable):',
+      e
+    );
     return null;
   }
 }
@@ -106,33 +137,31 @@ export const requestGsiToken = async (clientId: string): Promise<{ user: Partial
           }
           const expiresIn = Number(tokenResponse.expires_in) || 3600;
           persistToken(accessToken, expiresIn);
-          const firebaseUser = await linkFirebaseSession(accessToken);
 
+          let googleEmail: string | undefined;
+          let googleName: string | undefined;
+          let googlePicture: string | undefined;
           try {
             const userRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
               headers: { Authorization: `Bearer ${accessToken}` },
             });
             if (userRes.ok) {
               const userData = await userRes.json();
-              resolve({
-                user: {
-                  displayName: userData.name || firebaseUser?.displayName || 'Google Drive User',
-                  email: userData.email || firebaseUser?.email || '',
-                  photoURL: userData.picture || firebaseUser?.photoURL || '',
-                } as any,
-                accessToken,
-              });
-              return;
+              googleEmail = userData.email || undefined;
+              googleName = userData.name || undefined;
+              googlePicture = userData.picture || undefined;
             }
           } catch {
-            // fallback
+            // userinfo optional for linking
           }
+
+          const firebaseUser = await linkFirebaseSession(accessToken, googleEmail);
 
           resolve({
             user: {
-              displayName: firebaseUser?.displayName || 'Google Drive User',
-              email: firebaseUser?.email || '',
-              photoURL: firebaseUser?.photoURL || '',
+              displayName: googleName || firebaseUser?.displayName || 'Google Drive User',
+              email: googleEmail || firebaseUser?.email || '',
+              photoURL: googlePicture || firebaseUser?.photoURL || '',
             } as any,
             accessToken,
           });
@@ -216,8 +245,8 @@ export const googleSignIn = async (): Promise<{ user: any; accessToken: string }
     } catch (gsiErr: any) {
       const isCancelled =
         gsiErr?.message?.includes('user_cancel') ||
-        gsiErr?.message?.includes('closed') ||
-        gsiErr?.error === 'access_denied';
+        gsiErr?.error === 'access_denied' ||
+        gsiErr?.message?.includes('closed');
 
       if (isCancelled) {
         console.info('GSI sign-in dismissed by user.');
@@ -293,6 +322,7 @@ export const ensureValidToken = async (clientId?: string): Promise<string | null
           }
           const expiresIn = Number(tokenResponse.expires_in) || 3600;
           persistToken(tokenResponse.access_token, expiresIn);
+          void linkFirebaseSession(tokenResponse.access_token).catch(() => undefined);
           resolve(tokenResponse.access_token);
         },
       });
@@ -332,8 +362,27 @@ export const googleSignOut = async (options?: { revoke?: boolean }) => {
   persistToken(null);
 };
 
+/** True when Firebase Auth has a current user (required for neural embeddings). */
+export function isFirebaseReady(): boolean {
+  return Boolean(auth.currentUser);
+}
+
+/**
+ * Best-effort: if Drive token exists but Firebase is not linked, try linking again.
+ */
+export async function ensureFirebaseSessionForEmbed(): Promise<boolean> {
+  if (auth.currentUser) return true;
+  const token = cachedAccessToken;
+  if (!token) return false;
+  const user = await linkFirebaseSession(token);
+  return Boolean(user);
+}
+
 /** Firebase Auth ID token for backend /embed (not the Drive access token). */
 export async function getFirebaseIdToken(forceRefresh = false): Promise<string | null> {
+  if (!auth.currentUser) {
+    await ensureFirebaseSessionForEmbed();
+  }
   const user = auth.currentUser;
   if (!user) return null;
   try {
