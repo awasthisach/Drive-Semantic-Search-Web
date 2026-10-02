@@ -8,6 +8,12 @@ import { AuthErrorModal } from './components/AuthErrorModal';
 import { SemanticSearch } from './components/SemanticSearch';
 import { useDriveApp } from './hooks/useDriveApp';
 import { downloadDiagnostics } from './lib/diagnostics';
+import {
+  isEmbeddingConsentGranted,
+  revokeEmbeddingConsent,
+} from './lib/embeddings/consent';
+import { isEmbedConfigured } from './lib/embeddings/config';
+import { EmbeddingConsentModal } from './components/EmbeddingConsentModal';
 import type { DriveFile } from './types';
 
 const DeviceStorageScanner = React.lazy(() =>
@@ -68,6 +74,8 @@ export default function App() {
   } = useDriveApp();
 
   const [searchMoveTargets, setSearchMoveTargets] = React.useState<DriveFile[]>([]);
+  const [consentModalOpen, setConsentModalOpen] = React.useState(false);
+  const [embedConsentOn, setEmbedConsentOn] = React.useState(() => isEmbeddingConsentGranted());
 
   React.useEffect(() => {
     if (searchMoveTargetFile) {
@@ -94,6 +102,23 @@ export default function App() {
           >
             {formatSyncStatus(syncStats.status, isGoogleLoading)}
           </button>
+          {isEmbedConfigured() ? (
+            <button
+              type="button"
+              onClick={() => {
+                if (embedConsentOn) {
+                  revokeEmbeddingConsent();
+                  setEmbedConsentOn(false);
+                } else {
+                  setConsentModalOpen(true);
+                }
+              }}
+              className="text-xs px-2 py-1 rounded-lg border border-zinc-200 dark:border-zinc-700"
+              title={embedConsentOn ? 'Revoke embedding consent' : 'Enable semantic embeddings'}
+            >
+              {embedConsentOn ? 'Embeddings on' : 'Enable embeddings'}
+            </button>
+          ) : null}
           <button type="button" onClick={downloadDiagnostics} className="text-xs px-2 py-1 rounded-lg border border-zinc-200 dark:border-zinc-700" title="Export local diagnostics JSON (tokens redacted)">Diagnostics</button>
           {isGoogleConnected ? (
             <button type="button" onClick={handleGoogleSignOut} className="text-xs px-2 py-1 rounded-lg border border-zinc-200 dark:border-zinc-700">Sign out</button>
@@ -231,6 +256,18 @@ export default function App() {
       )}
 
       <BrandFooter />
+
+      <EmbeddingConsentModal
+        open={consentModalOpen}
+        onClose={() => setConsentModalOpen(false)}
+        onAllow={() => {
+          setEmbedConsentOn(true);
+          setConsentModalOpen(false);
+        }}
+        onTextOnly={() => {
+          setConsentModalOpen(false);
+        }}
+      />
 
       {searchMoveTargets.length > 0 && (
         <MoveToFolderModal
