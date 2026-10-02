@@ -6,7 +6,7 @@ import { DriveFile, SemanticSearchResult } from '../types';
 import { searchContentIndex } from './contentIndex';
 import { expandSemanticQueries, expandTerms } from './queryExpand';
 import { isEmbedConfigured } from './embeddings/config';
-import { createEmbeddingProvider } from './embeddings/client';
+import { createEmbeddingProvider, EmbedAuthError } from './embeddings/client';
 import { getFirebaseIdToken } from './firebaseAuth';
 import { searchNeuralByEmbedding } from './vectorIndex';
 import { logDiag } from './diagnostics';
@@ -119,6 +119,10 @@ async function tryNeuralSearch(
         }
       } catch (variantError) {
         console.warn('[searchEngine] neural variant failed', variant, variantError);
+        if (variantError instanceof EmbedAuthError) {
+          onStatus?.('Neural search needs Firebase session (Drive-only sign-in); showing BM25 and metadata matches.');
+          return null;
+        }
       }
     }
     if (!succeeded) {
@@ -129,7 +133,11 @@ async function tryNeuralSearch(
     return out;
   } catch (e) {
     console.warn('[searchEngine] neural search failed; BM25/metadata only', e);
-    onStatus?.('Neural search unavailable; showing BM25 and metadata matches.');
+    if (e instanceof EmbedAuthError) {
+      onStatus?.('Neural search needs Firebase session (Drive-only sign-in); showing BM25 and metadata matches.');
+    } else {
+      onStatus?.('Neural search unavailable; showing BM25 and metadata matches.');
+    }
     return null;
   }
 }
