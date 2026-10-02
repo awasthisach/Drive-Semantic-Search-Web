@@ -33,6 +33,21 @@ const TabLoadingFallback = () => (
   </div>
 );
 
+function formatSyncStatus(status: string, loading: boolean): string {
+  if (loading) return 'Syncing\u2026';
+  switch (status) {
+    case 'not_connected': return 'Not connected';
+    case 'demo': return 'Demo mode';
+    case 'connected': return 'Connected';
+    case 'offline_only': return 'Offline only';
+    case 'error': return 'Sync error';
+    case 'pending': return 'Partial sync';
+    case 'syncing': return 'Syncing\u2026';
+    case 'synced': return 'Synced';
+    default: return status;
+  }
+}
+
 export default function App() {
   const {
     files, folders, vaultFiles, vaultLoaded,
@@ -75,9 +90,9 @@ export default function App() {
             onClick={() => void handleSyncGoogleDrive()}
             disabled={isGoogleLoading || !isGoogleConnected}
             title={isGoogleConnected ? 'Sync Google Drive now' : 'Connect Google Drive to sync'}
-            className="text-[10px] font-semibold px-2 py-1 rounded-full border border-zinc-200 dark:border-zinc-700 capitalize disabled:cursor-not-allowed disabled:opacity-60"
+            className="text-[10px] font-semibold px-2 py-1 rounded-full border border-zinc-200 dark:border-zinc-700 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {isGoogleLoading ? 'Syncing…' : syncStats.status}
+            {formatSyncStatus(syncStats.status, isGoogleLoading)}
           </button>
           <button type="button" onClick={downloadDiagnostics} className="text-xs px-2 py-1 rounded-lg border border-zinc-200 dark:border-zinc-700" title="Export local diagnostics JSON (tokens redacted)">Diagnostics</button>
           {isGoogleConnected ? (
