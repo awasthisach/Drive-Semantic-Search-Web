@@ -6,7 +6,11 @@ import { DriveFile, SemanticSearchResult } from '../types';
 import { searchContentIndex } from './contentIndex';
 import { expandSemanticQueries, expandTerms } from './queryExpand';
 import { isEmbedConfigured } from './embeddings/config';
-import { createEmbeddingProvider, EmbedAuthError } from './embeddings/client';
+import {
+  createEmbeddingProvider,
+  EmbedAuthError,
+  ConsentRequiredError,
+} from './embeddings/client';
 import { getFirebaseIdToken } from './firebaseAuth';
 import { searchNeuralByEmbedding } from './vectorIndex';
 import { logDiag } from './diagnostics';
@@ -119,6 +123,11 @@ async function tryNeuralSearch(
         }
       } catch (variantError) {
         console.warn('[searchEngine] neural variant failed', variant, variantError);
+        if (variantError instanceof ConsentRequiredError) {
+          logDiag('info', 'neural.consent', 'embeddings disabled — no content consent');
+          onStatus?.('Local text search active — semantic embeddings disabled.');
+          return null;
+        }
         if (variantError instanceof EmbedAuthError) {
           logDiag('warn', 'neural.auth', 'Drive-only sign-in; embed auth missing');
           onStatus?.('Neural search needs Firebase session (Drive-only sign-in); showing BM25 and metadata matches.');
@@ -134,7 +143,10 @@ async function tryNeuralSearch(
     return out;
   } catch (e) {
     console.warn('[searchEngine] neural search failed; BM25/metadata only', e);
-    if (e instanceof EmbedAuthError) {
+    if (e instanceof ConsentRequiredError) {
+      logDiag('info', 'neural.consent', 'embeddings disabled — no content consent (outer)');
+      onStatus?.('Local text search active — semantic embeddings disabled.');
+    } else if (e instanceof EmbedAuthError) {
       logDiag('warn', 'neural.auth', 'Drive-only sign-in (outer)');
       onStatus?.('Neural search needs Firebase session (Drive-only sign-in); showing BM25 and metadata matches.');
     } else {
