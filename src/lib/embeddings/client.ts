@@ -1,6 +1,11 @@
 import { EMBED_CONFIG, isEmbedConfigured } from './config';
 import { sleep } from '../rateLimit';
 import type { EmbedRequest, EmbedResponse, EmbeddingProvider } from './types';
+import {
+  ConsentRequiredError,
+  createEmbeddingPolicy,
+  type EmbeddingPolicy,
+} from './consent';
 
 export class EmbedConfigError extends Error {
   constructor(message: string) {
@@ -25,16 +30,30 @@ export class EmbedApiError extends Error {
   }
 }
 
+export { ConsentRequiredError };
+
 /**
  * Calls the authenticated backend /embed endpoint.
  * API keys never live in the browser — only a Firebase ID token is sent.
+ * Content is never sent unless EmbeddingPolicy.canSendContent() is true.
  */
 export class BackendEmbeddingProvider implements EmbeddingProvider {
   readonly embeddingModel = EMBED_CONFIG.model;
   readonly embeddingVersion = EMBED_CONFIG.version;
   readonly dimension = EMBED_CONFIG.dimension;
 
-  constructor(private readonly getIdToken: () => Promise<string | null>) {}
+  constructor(
+    private readonly getIdToken: () => Promise<string | null>,
+    private readonly policy: EmbeddingPolicy = createEmbeddingPolicy()
+  ) {}
+
+  private assertContentConsent(): void {
+    if (!this.policy.canSendContent()) {
+      throw new ConsentRequiredError(
+        'Embedding content consent is required before sending text to the embed worker'
+      );
+    }
+  }
 
   async embedDocuments(texts: string[]): Promise<number[][]> {
     return this.embed(texts, 'document');
@@ -49,6 +68,8 @@ export class BackendEmbeddingProvider implements EmbeddingProvider {
     if (!isEmbedConfigured()) {
       throw new EmbedConfigError('VITE_EMBED_ENDPOINT is not set. Deploy workers/embed and set the public URL.');
     }
+    // Policy guard: no content leaves the browser without explicit consent.
+    this.assertContentConsent();
     if (!texts.length) return [];
 
     const cleaned = texts.map(t => (t || '').slice(0, EMBED_CONFIG.maxCharsPerText));
@@ -126,6 +147,9 @@ export class BackendEmbeddingProvider implements EmbeddingProvider {
   }
 }
 
-export function createEmbeddingProvider(getIdToken: () => Promise<string | null>): EmbeddingProvider {
-  return new BackendEmbeddingProvider(getIdToken);
+export function createEmbeddingProvider(
+  getIdToken: () => Promise<string | null>,
+  policy?: EmbeddingPolicy
+): EmbeddingProvider {
+  return new BackendEmbeddingProvider(getIdToken, policy ?? createEmbeddingPolicy());
 }
