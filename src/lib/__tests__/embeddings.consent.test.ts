@@ -7,16 +7,13 @@ import {
   createEmbeddingPolicy,
   EMBEDDING_CONSENT_POLICY_VERSION,
   ConsentRequiredError,
+  resetEmbeddingConsentForTests,
 } from '../embeddings/consent';
 import { BackendEmbeddingProvider } from '../embeddings/client';
 
 describe('embedding consent policy', () => {
   beforeEach(() => {
-    try {
-      localStorage.clear();
-    } catch {
-      /* ignore */
-    }
+    resetEmbeddingConsentForTests();
   });
 
   it('defaults to not_decided and blocks content', () => {

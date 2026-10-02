@@ -20,6 +20,9 @@ export const EMBEDDING_CONSENT_POLICY_VERSION = '1';
 
 const LS_KEY = 'dssw-embedding-consent-v1';
 
+/** In-memory fallback when localStorage is unavailable (tests / private mode). */
+let memoryConsent: EmbeddingConsent | null = null;
+
 export interface EmbeddingPolicy {
   canSendContent(): boolean;
   getConsentVersion(): string | null;
@@ -35,13 +38,30 @@ export class ConsentRequiredError extends Error {
 
 function readRaw(): EmbeddingConsent | null {
   try {
-    const raw = localStorage.getItem(LS_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as EmbeddingConsent;
-    if (!parsed || typeof parsed.state !== 'string') return null;
-    return parsed;
+    if (typeof localStorage !== 'undefined') {
+      const raw = localStorage.getItem(LS_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as EmbeddingConsent;
+        if (parsed && typeof parsed.state === 'string') {
+          memoryConsent = parsed;
+          return parsed;
+        }
+      }
+    }
   } catch {
-    return null;
+    /* fall through to memory */
+  }
+  return memoryConsent;
+}
+
+function writeRaw(next: EmbeddingConsent): void {
+  memoryConsent = next;
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(LS_KEY, JSON.stringify(next));
+    }
+  } catch {
+    /* private mode — memory only */
   }
 }
 
@@ -56,7 +76,6 @@ export function getEmbeddingConsent(): EmbeddingConsent {
       policyVersion: EMBEDDING_CONSENT_POLICY_VERSION,
     };
   }
-  // Old policy grants are treated as not decided until user re-confirms.
   if (
     stored.state === 'granted' &&
     stored.policyVersion !== EMBEDDING_CONSENT_POLICY_VERSION
@@ -84,11 +103,7 @@ export function grantEmbeddingConsent(scope: EmbeddingConsent['scope'] = 'select
     grantedAt: new Date().toISOString(),
     policyVersion: EMBEDDING_CONSENT_POLICY_VERSION,
   };
-  try {
-    localStorage.setItem(LS_KEY, JSON.stringify(next));
-  } catch {
-    /* private mode */
-  }
+  writeRaw(next);
   return next;
 }
 
@@ -103,12 +118,18 @@ export function revokeEmbeddingConsent(): EmbeddingConsent {
     revokedAt: new Date().toISOString(),
     policyVersion: EMBEDDING_CONSENT_POLICY_VERSION,
   };
-  try {
-    localStorage.setItem(LS_KEY, JSON.stringify(next));
-  } catch {
-    /* private mode */
-  }
+  writeRaw(next);
   return next;
+}
+
+/** Test helper: clear memory + storage. */
+export function resetEmbeddingConsentForTests(): void {
+  memoryConsent = null;
+  try {
+    if (typeof localStorage !== 'undefined') localStorage.removeItem(LS_KEY);
+  } catch {
+    /* ignore */
+  }
 }
 
 export function createEmbeddingPolicy(): EmbeddingPolicy {
@@ -123,5 +144,14 @@ export function createEmbeddingPolicy(): EmbeddingPolicy {
     getState(): EmbeddingConsentState {
       return getEmbeddingConsent().state;
     },
+  };
+}
+
+/** Always-allow policy for unit tests that mock the network layer. */
+export function allowAllEmbeddingPolicy(): EmbeddingPolicy {
+  return {
+    canSendContent: () => true,
+    getConsentVersion: () => EMBEDDING_CONSENT_POLICY_VERSION,
+    getState: () => 'granted',
   };
 }
