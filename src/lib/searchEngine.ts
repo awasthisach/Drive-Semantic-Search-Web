@@ -120,6 +120,7 @@ async function tryNeuralSearch(
       } catch (variantError) {
         console.warn('[searchEngine] neural variant failed', variant, variantError);
         if (variantError instanceof EmbedAuthError) {
+          logDiag('warn', 'neural.auth', 'Drive-only sign-in; embed auth missing');
           onStatus?.('Neural search needs Firebase session (Drive-only sign-in); showing BM25 and metadata matches.');
           return null;
         }
@@ -134,8 +135,10 @@ async function tryNeuralSearch(
   } catch (e) {
     console.warn('[searchEngine] neural search failed; BM25/metadata only', e);
     if (e instanceof EmbedAuthError) {
+      logDiag('warn', 'neural.auth', 'Drive-only sign-in (outer)');
       onStatus?.('Neural search needs Firebase session (Drive-only sign-in); showing BM25 and metadata matches.');
     } else {
+      logDiag('warn', 'neural', String(e instanceof Error ? e.message : e));
       onStatus?.('Neural search unavailable; showing BM25 and metadata matches.');
     }
     return null;
@@ -173,7 +176,6 @@ export async function runHybridSearch(
   const results: SemanticSearchResult[] = [];
   const fileById = new Map(filtered.map(f => [f.id, f]));
 
-  // Candidates = files with any positive signal (not entire drive listing)
   const candidateIds = new Set<string>();
   for (const f of filtered) {
     if (metadataScore(query, f).score > 0) candidateIds.add(f.id);
@@ -187,8 +189,6 @@ export async function runHybridSearch(
     }
   }
 
-  // Use neural hybrid weights only when embed path produced at least one hit.
-  // Empty map would dilute BM25/meta under 0.55 neural weight.
   const neuralPipelineOk = neuralHits !== null && neuralHits.size > 0;
 
   for (const id of candidateIds) {
