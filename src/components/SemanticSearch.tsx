@@ -4,7 +4,7 @@ import {
 } from 'lucide-react';
 import { DriveFile, FolderItem, SemanticSearchResult } from '../types';
 import { runHybridSearch } from '../lib/searchEngine';
-import { canExtractText, extractDriveFileText } from '../lib/contentExtract';
+import { canExtractText, extractDriveFileTextWithTimeout, ExtractAbortedError } from '../lib/contentExtract';
 import {
   putIndexedDocument,
   listIndexedDocuments,
@@ -55,6 +55,7 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
   const [resumeFrom, setResumeFrom] = useState(0);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const cancelIndexRef = useRef(false);
+  const indexAbortRef = useRef<AbortController | null>(null);
   const paginatedResults = useMemo(
     () => paginateResults(results, currentPage),
     [results, currentPage]
@@ -145,39 +146,13 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
       : globalThis.setTimeout(run, 250);
     return () => {
       cancelled = true;
-      if ('cancelIdleCallback' in window && typeof idle === 'number') {
-        (window as Window & { cancelIdleCallback?: (id: number) => void }).cancelIdleCallback?.(idle);
+      if (typeof idle === 'number' && 'cancelIdleCallback' in window) {
+        (window as any).cancelIdleCallback(idle);
       } else {
-        globalThis.clearTimeout(idle);
+        globalThis.clearTimeout(idle as any);
       }
     };
-  }, [corpusKey, indexedCount]);
-
-  useEffect(() => {
-    let cancelled = false;
-    const handle = window.setTimeout(async () => {
-      setCurrentPage(1);
-      setSearching(true);
-      try {
-        const r = await runHybridSearch(
-          query,
-          files,
-          selectedCategory,
-          corpusKey,
-          setSearchStatus
-        );
-        if (!cancelled) setResults(r);
-      } finally {
-        if (!cancelled) setSearching(false);
-      }
-    }, 350);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(handle);
-    };
-  }, [query, files, selectedCategory, corpusKey]);
-
-  const driveFilesCount = files.filter(f => f.isGoogleDriveItem).length;
+  }, [indexedCount, corpusKey]);
 
   const handleIndexContent = async () => {
     let token = accessToken || null;
@@ -196,6 +171,9 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
     }
 
     cancelIndexRef.current = false;
+    indexAbortRef.current?.abort();
+    const indexController = new AbortController();
+    indexAbortRef.current = indexController;
     setIndexing(true);
     let ok = 0;
     let fail = 0;
@@ -204,8 +182,6 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
     let truncated = 0;
     const failedNames: string[] = [];
     const n = extractable.length;
-    // Reuse one provider for the whole run. It is stateless; recreating it for
-    // every file added avoidable setup and token-provider work to large scans.
     const embeddingProvider = isEmbedConfigured()
       ? createEmbeddingProvider(() => getFirebaseIdToken())
       : null;
@@ -254,8 +230,7 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
               if (migration.failed) {
                 fail++;
                 embeddingFail++;
-                if (failedNames.length < 20) failedNames.push(f.name);
-                continue;
+                if (failedNames.length < 5) failedNames.push(f.name);
               }
             }
           }
@@ -263,203 +238,262 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
           writeCursor(sig, i + 1);
           continue;
         }
-        setIndexProgress(`Indexing ${i + 1}/${extractable.length} (${pct}%): ${f.name}`);
-        const { text, source, truncated: textWasTruncated } = await extractDriveFileText(token, f.id, f.mimeType, f.name);
-        if (text && text.trim().length > 0) {
-          await putIndexedDocument({
-            id: f.id,
-            name: f.name,
-            mimeType: f.mimeType,
-            text: text.slice(0, MAX_INDEX_CHARS),
-            source,
-            driveModifiedTime: f.modifiedTime,
-            textTruncated: textWasTruncated,
-            corpusKey,
-          });
-          if (embeddingProvider) {
-            try {
-              const chunks = buildEmbeddingChunks(f.name, text.slice(0, MAX_INDEX_CHARS));
-              const embedding = await embedAndStoreChunks({
-                provider: embeddingProvider,
-                fileId: f.id,
-                chunks,
-                corpusKey,
-                driveModifiedTime: f.modifiedTime,
-              });
-              if (embedding.failed) embeddingFail++;
-            } catch (ve) {
-              console.warn('[SemanticSearch] vector embed skipped', f.id, ve);
-              embeddingFail++;
-            }
-          }
-          ok++;
-          if (textWasTruncated) truncated++;
-          writeCursor(sig, i + 1);
-        } else {
-          fail++;
-          if (failedNames.length < 20) failedNames.push(f.name);
+
+        setIndexProgress(`Extracting ${i + 1}/${extractable.length} (${pct}%): ${f.name}`);
+        const { text, source, truncated: textWasTruncated } = await extractDriveFileTextWithTimeout(
+          token,
+          f.id,
+          f.mimeType || '',
+          f.name || '',
+          { signal: indexController.signal }
+        );
+
+        if (cancelIndexRef.current || indexController.signal.aborted) {
+          writeCursor(sig, i);
+          setIndexProgress(`Cancelled at ${i}/${extractable.length}. Resume available.`);
+          break;
         }
-      } catch {
+
+        if (!text || !text.trim()) {
+          skippedFresh++;
+          writeCursor(sig, i + 1);
+          continue;
+        }
+
+        await putIndexedDocument({
+          id: f.id,
+          name: f.name,
+          mimeType: f.mimeType || '',
+          text: text.slice(0, MAX_INDEX_CHARS),
+          source,
+          driveModifiedTime: f.modifiedTime,
+          textTruncated: textWasTruncated,
+          corpusKey,
+        });
+
+        if (textWasTruncated) truncated++;
+
+        if (embeddingProvider) {
+          try {
+            const chunks = buildEmbeddingChunks(f.name, text.slice(0, MAX_INDEX_CHARS));
+            const embedding = await embedAndStoreChunks({
+              provider: embeddingProvider,
+              fileId: f.id,
+              chunks,
+              corpusKey,
+              driveModifiedTime: f.modifiedTime,
+            });
+            if (embedding.failed) embeddingFail++;
+          } catch (embedErr) {
+            console.warn('[SemanticSearch] embed skipped for', f.name, embedErr);
+            embeddingFail++;
+          }
+        }
+
+        ok++;
+        writeCursor(sig, i + 1);
+      } catch (err: any) {
+        if (
+          err instanceof ExtractAbortedError ||
+          err?.name === 'ExtractAbortedError' ||
+          indexController.signal.aborted ||
+          cancelIndexRef.current
+        ) {
+          writeCursor(sig, i);
+          setIndexProgress(`Cancelled / timed out at ${i}/${extractable.length}. Resume available.`);
+          break;
+        }
         fail++;
-        if (failedNames.length < 20) failedNames.push(f.name);
+        if (failedNames.length < 5) failedNames.push(f.name);
+        console.warn('[SemanticSearch] index failed for', f.name, err);
+        writeCursor(sig, i + 1);
       }
-      // Yield periodically so large scans keep the UI responsive without
-      // imposing a 100 ms delay on every file.
-      if ((i - startAt + 1) % 8 === 0) await new Promise(r => setTimeout(r, 0));
     }
 
-    if (!cancelIndexRef.current) {
+    if (!cancelIndexRef.current && !indexController.signal.aborted) {
       clearCursor();
+      setResumeFrom(0);
       setIndexProgress(
-        `Done: ${ok} indexed, ${skippedFresh} already fresh, ${fail} failed` +
-          (embeddingFail ? `, ${embeddingFail} embedding failed` : '') +
-          (truncated ? `, ${truncated} truncated` : '') +
-          (failedNames.length
-            ? `. Failed: ${failedNames.join(', ')}${fail > failedNames.length ? '\u2026' : ''}`
-            : '.')
+        `Done. Indexed ${ok}, skipped fresh ${skippedFresh}, failed ${fail}` +
+          (embeddingFail ? `, embed fail ${embeddingFail}` : '') +
+          (truncated ? `, truncated ${truncated}` : '') +
+          (failedNames.length ? `. Failed: ${failedNames.join(', ')}` : '')
       );
     }
+    indexAbortRef.current = null;
     setIndexing(false);
-    try {
-      const raw = sessionStorage.getItem(CURSOR_KEY);
-      setResumeFrom(raw ? (Number(raw.split('|')[1] || 0) || 0) : 0);
-    } catch { setResumeFrom(0); }
     await refreshIndexedCount();
   };
 
+  useEffect(() => {
+    let cancelled = false;
+    const handle = window.setTimeout(async () => {
+      if (!query.trim()) {
+        setResults([]);
+        setSearchStatus('');
+        return;
+      }
+      setCurrentPage(1);
+      setSearching(true);
+      try {
+        const r = await runHybridSearch(
+          query,
+          files,
+          selectedCategory,
+          corpusKey,
+          setSearchStatus
+        );
+        if (!cancelled) setResults(r);
+      } finally {
+        if (!cancelled) setSearching(false);
+      }
+    }, 350);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(handle);
+    };
+  }, [query, files, selectedCategory, corpusKey]);
+
+  const driveFilesCount = files.filter(f => f.isGoogleDriveItem).length;
+
   return (
-    <div className="space-y-4">
-      <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 space-y-3">
-        <div className="flex items-center gap-2">
-          <Sparkles className="w-5 h-5 text-indigo-500" />
-          <h2 className="text-sm font-bold">Hybrid search</h2>
-          <span className="text-[10px] text-zinc-500">neural + BM25 + metadata</span>
+    <div className="flex flex-col h-full gap-3 p-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative flex-1 min-w-[220px]">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
+          <input
+            className="w-full pl-9 pr-3 py-2 rounded-lg border bg-background text-sm"
+            placeholder="Semantic search across indexed Drive content\u2026"
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+          />
         </div>
-        <div className="flex flex-wrap gap-2">
-          <div className="relative flex-1 min-w-[180px]">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
-            <input
-              value={query}
-              onChange={e => setQuery(e.target.value)}
-              placeholder="Search files and indexed content\u2026"
-              className="w-full pl-9 pr-3 py-2 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-950 text-sm"
-            />
-          </div>
-          <select
-            value={selectedCategory}
-            onChange={e => setSelectedCategory(e.target.value)}
-            className="px-3 py-2 rounded-xl border text-xs font-semibold"
-          >
-            <option value="all">All</option>
-            <option value="document">Documents</option>
-            <option value="image">Images</option>
-            <option value="spreadsheet">Sheets</option>
-            <option value="google_drive">Drive only</option>
-          </select>
-        </div>
-        <div className="flex flex-wrap items-center gap-2 text-xs">
-          <span className="text-zinc-500">
-            Indexed bodies: <strong>{indexedCount}</strong>
-            {driveFilesCount ? ` \u00b7 ${driveFilesCount} Drive files in list` : ''}
-          </span>
-          <button
-            type="button"
-            disabled={indexing}
-            onClick={handleIndexContent}
-            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-indigo-600 text-white font-bold disabled:opacity-50"
-          >
-            {indexing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Database className="w-3.5 h-3.5" />}
-            {indexing ? 'Indexing\u2026' : resumeFrom > 0 ? `Resume indexing (${resumeFrom}+)` : 'Index extractable content'}
-          </button>
-          {indexing && (
+        <select
+          className="text-sm border rounded-lg px-2 py-2 bg-background"
+          value={selectedCategory}
+          onChange={e => setSelectedCategory(e.target.value)}
+        >
+          <option value="all">All</option>
+          <option value="google_drive">Google Drive</option>
+          <option value="document">Documents</option>
+          <option value="spreadsheet">Spreadsheets</option>
+          <option value="presentation">Presentations</option>
+          <option value="pdf">PDFs</option>
+          <option value="image">Images</option>
+        </select>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-500">
+        <Database className="w-3.5 h-3.5" />
+        <span>{indexedCount} indexed</span>
+        {indexing ? (
+          <>
+            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            <span className="truncate max-w-[280px]">{indexProgress}</span>
             <button
               type="button"
+              className="px-2 py-0.5 rounded border border-red-400 text-red-600 hover:bg-red-50"
               onClick={() => {
                 cancelIndexRef.current = true;
+                indexAbortRef.current?.abort();
+                setIndexProgress('Cancelling\u2026');
               }}
-              className="px-2 py-1.5 rounded-lg border text-xs font-semibold"
             >
               Cancel
             </button>
-          )}
-        </div>
-        {indexProgress && (
-          <p className="text-[11px] text-zinc-500 font-mono break-all">{indexProgress}</p>
+          </>
+        ) : (
+          <>
+            <button
+              type="button"
+              className="px-2 py-0.5 rounded border hover:bg-zinc-100"
+              onClick={handleIndexContent}
+            >
+              Index / Rebuild
+            </button>
+            {resumeFrom > 0 && (
+              <button
+                type="button"
+                className="px-2 py-0.5 rounded border border-blue-400 text-blue-600 hover:bg-blue-50"
+                onClick={handleIndexContent}
+              >
+                Resume from {resumeFrom}
+              </button>
+            )}
+            {indexProgress && <span className="truncate max-w-[240px]">{indexProgress}</span>}
+          </>
         )}
-        {searchStatus && query.trim() && (
-          <p className={`text-[11px] font-medium ${searchStatus.includes('unavailable') ? 'text-amber-600' : 'text-emerald-600'}`}>
+        {searchStatus && (
+          <span className="ml-auto flex items-center gap-1">
+            <Sparkles className="w-3.5 h-3.5" />
             {searchStatus}
-          </p>
+          </span>
         )}
       </div>
 
-      <div className="space-y-2">
+      <div className="flex-1 overflow-auto space-y-2">
         {searching && (
-          <div className="flex items-center gap-2 text-xs text-zinc-500 py-4 justify-center">
+          <div className="flex items-center gap-2 text-sm text-zinc-500 p-3">
             <Loader2 className="w-4 h-4 animate-spin" /> Searching\u2026
           </div>
         )}
         {!searching && results.length === 0 && query.trim() && (
-          indexedCount === 0 ? (
-            <div className="text-center py-8 space-y-3">
-              <p className="text-sm text-zinc-500">
-                Content index is empty \u2014 index extractable files for body search.
-              </p>
-              <button
-                type="button"
-                disabled={indexing}
-                onClick={handleIndexContent}
-                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-bold"
-              >
-                {indexing ? 'Indexing\u2026' : resumeFrom > 0 ? `Resume indexing (${resumeFrom}+)` : 'Index extractable content'}
-              </button>
-            </div>
-          ) : (
-            <p className="text-sm text-zinc-500 text-center py-8">No matches. Broaden the query.</p>
-          )
+          <div className="text-sm text-zinc-500 p-3">No results.</div>
         )}
-        {!searching && paginatedResults.items.map(r => (
-          <div
-            key={r.file.id}
-            className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3 space-y-2"
-          >
-            <div className="flex items-start justify-between gap-2">
-              <button type="button" className="text-left min-w-0 flex-1" onClick={() => onSelectFile(r.file)}>
-                <div className="text-sm font-semibold truncate">{r.file.name}</div>
-                <div className="text-[11px] text-zinc-500 mt-0.5">{r.relevanceReason} \u00b7 score {r.score}</div>
-              </button>
-              <div className="flex items-center gap-1 shrink-0">
-                <button type="button" title="Star" onClick={() => onToggleStar(r.file.id)}>
-                  <Star className={`w-4 h-4 ${r.file.starred ? 'text-amber-500 fill-amber-500' : 'text-zinc-400'}`} />
-                </button>
-                <button type="button" title="Pin offline" onClick={() => onToggleOffline(r.file.id)}>
-                  <Pin className={`w-4 h-4 ${r.file.isOffline ? 'text-emerald-500' : 'text-zinc-400'}`} />
-                </button>
-                <button type="button" title="Copy link" onClick={() => copyLink(r.file)}>
-                  <Link2 className={`w-4 h-4 ${copiedId === r.file.id ? 'text-blue-500' : 'text-zinc-400'}`} />
-                </button>
-                <button type="button" title="Move" onClick={() => onMoveFile(r.file)}>
-                  <FolderInput className="w-4 h-4 text-indigo-500" />
-                </button>
+        {!searching &&
+          paginatedResults.items.map(r => (
+            <div
+              key={r.file.id}
+              className="border rounded-lg p-3 hover:bg-zinc-50 dark:hover:bg-zinc-900/40 cursor-pointer group"
+              onClick={() => onSelectFile(r.file)}
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="font-medium text-sm truncate">{r.file.name}</div>
+                  <div className="text-xs text-zinc-500 mt-0.5">
+                    score {r.score} \u00b7 {r.relevanceReason}
+                  </div>
+                </div>
+                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button
+                    type="button"
+                    title="Star"
+                    onClick={e => {
+                      e.stopPropagation();
+                      onToggleStar(r.file.id);
+                    }}
+                  >
+                    <Star className={`w-4 h-4 ${r.file.starred ? 'fill-yellow-400 text-yellow-500' : 'text-zinc-400'}`} />
+                  </button>
+                  <button type="button" title="Pin offline" onClick={e => { e.stopPropagation(); onToggleOffline(r.file.id); }}>
+                    <Pin className={`w-4 h-4 ${r.file.isOffline ? 'text-emerald-500' : 'text-zinc-400'}`} />
+                  </button>
+                  <button type="button" title="Copy link" onClick={e => { e.stopPropagation(); void copyLink(r.file); }}>
+                    <Link2 className={`w-4 h-4 ${copiedId === r.file.id ? 'text-blue-500' : 'text-zinc-400'}`} />
+                  </button>
+                  <button type="button" title="Move" onClick={e => { e.stopPropagation(); onMoveFile(r.file); }}>
+                    <FolderInput className="w-4 h-4 text-indigo-500" />
+                  </button>
+                </div>
               </div>
+              {r.matchedSnippet && (
+                <p className="text-[11px] text-zinc-600 dark:text-zinc-400 leading-relaxed mt-1">
+                  {highlightSegments(r.matchedSnippet || '', query).map((seg, i) =>
+                    seg.match ? (
+                      <mark key={i} className="bg-amber-200/80 dark:bg-amber-500/30 rounded px-0.5">{seg.text}</mark>
+                    ) : (
+                      <span key={i}>{seg.text}</span>
+                    )
+                  )}
+                </p>
+              )}
             </div>
-            {r.matchedSnippet && (
-              <p className="text-[11px] text-zinc-600 dark:text-zinc-400 leading-relaxed">
-                {highlightSegments(r.matchedSnippet || '', query).map((seg, i) =>
-                  seg.match ? (
-                    <mark key={i} className="bg-amber-200/80 dark:bg-amber-500/30 rounded px-0.5">{seg.text}</mark>
-                  ) : (
-                    <span key={i}>{seg.text}</span>
-                  )
-                )}
-              </p>
-            )}
-          </div>
-        ))}
+          ))}
+
         {!searching && paginatedResults.total > 0 && paginatedResults.pageCount > 1 && (
           <div className="flex flex-wrap items-center justify-between gap-2 pt-2 text-xs text-zinc-500">
             <span>
-              Showing {paginatedResults.start}–{paginatedResults.end} of {paginatedResults.total}
+              Showing {paginatedResults.start}\u2013{paginatedResults.end} of {paginatedResults.total}
             </span>
             <div className="flex items-center gap-2">
               <button
