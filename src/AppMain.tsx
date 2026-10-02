@@ -8,6 +8,7 @@ import { AuthErrorModal } from './components/AuthErrorModal';
 import { SemanticSearch } from './components/SemanticSearch';
 import { useDriveApp } from './hooks/useDriveApp';
 import { downloadDiagnostics } from './lib/diagnostics';
+import type { DriveFile } from './types';
 
 const DeviceStorageScanner = React.lazy(() =>
   import('./components/DeviceStorageScanner').then(m => ({ default: m.DeviceStorageScanner }))
@@ -50,6 +51,19 @@ export default function App() {
     handleVerifyHashes, handleAddVaultFile, handleDeleteVaultFile,
     makeCorpusKey, ensureValidToken, getAccessToken,
   } = useDriveApp();
+
+  const [searchMoveTargets, setSearchMoveTargets] = React.useState<DriveFile[]>([]);
+
+  React.useEffect(() => {
+    if (searchMoveTargetFile) {
+      setSearchMoveTargets([searchMoveTargetFile]);
+    }
+  }, [searchMoveTargetFile]);
+
+  const closeMoveModal = () => {
+    setSearchMoveTargets([]);
+    setSearchMoveTargetFile(null);
+  };
 
   return (
     <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100">
@@ -117,7 +131,14 @@ export default function App() {
               files={files}
               folders={folders}
               onSelectFile={setPreviewFile}
-              onMoveFile={f => setSearchMoveTargetFile(f)}
+              onMoveFile={f => {
+                setSearchMoveTargets([f]);
+                setSearchMoveTargetFile(f);
+              }}
+              onMoveFiles={list => {
+                setSearchMoveTargets(list);
+                setSearchMoveTargetFile(list[0] || null);
+              }}
               onToggleStar={handleToggleStar}
               onToggleOffline={handleToggleOffline}
               accessToken={googleAccessToken}
@@ -185,23 +206,27 @@ export default function App() {
             file={previewFile}
             onClose={() => setPreviewFile(null)}
             onToggleOffline={() => handleToggleOffline(previewFile.id)}
-            onMove={() => { setSearchMoveTargetFile(previewFile); setPreviewFile(null); }}
+            onMove={() => {
+              setSearchMoveTargets([previewFile]);
+              setSearchMoveTargetFile(previewFile);
+              setPreviewFile(null);
+            }}
           />
         </React.Suspense>
       )}
 
       <BrandFooter />
 
-      {searchMoveTargetFile && (
+      {searchMoveTargets.length > 0 && (
         <MoveToFolderModal
-          isOpen={Boolean(searchMoveTargetFile)}
-          onClose={() => setSearchMoveTargetFile(null)}
-          selectedFiles={[searchMoveTargetFile]}
+          isOpen={searchMoveTargets.length > 0}
+          onClose={closeMoveModal}
+          selectedFiles={searchMoveTargets}
           folders={folders}
           allFiles={files}
           onConfirmMove={(folderId) => {
-            handleMoveFilesToFolder([searchMoveTargetFile.id], folderId);
-            setSearchMoveTargetFile(null);
+            handleMoveFilesToFolder(searchMoveTargets.map(f => f.id), folderId);
+            closeMoveModal();
           }}
           onCreateFolder={handleCreateFolder}
         />

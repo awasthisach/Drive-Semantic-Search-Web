@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
-  Search, Sparkles, Loader2, Database, FolderInput, Star, Pin, Link2,
+  Search, Sparkles, Loader2, Database, FolderInput, Star, Pin, Link2, Check,
 } from 'lucide-react';
 import { DriveFile, FolderItem, SemanticSearchResult } from '../types';
 import { runHybridSearch } from '../lib/searchEngine';
@@ -25,6 +25,8 @@ interface SemanticSearchProps {
   folders: FolderItem[];
   onSelectFile: (file: DriveFile) => void;
   onMoveFile: (file: DriveFile) => void;
+  /** Bulk move from search results (preferred when selecting multiple). */
+  onMoveFiles?: (files: DriveFile[]) => void;
   onToggleStar: (id: string) => void;
   onToggleOffline: (id: string) => void;
   accessToken: string | null;
@@ -44,11 +46,59 @@ async function acquireScreenWakeLock(): Promise<WakeLockSentinel | null> {
   }
 }
 
+/**
+ * Match Search category dropdown to files for both search and index scope.
+ * Important: "Documents" must NOT include images (no OCR of screenshots).
+ */
+export function matchesSearchCategory(file: DriveFile, filter: string): boolean {
+  if (!filter || filter === 'all') return true;
+  if (filter === 'google_drive') return Boolean(file.isGoogleDriveItem);
+  const mime = (file.mimeType || '').toLowerCase();
+  const name = (file.name || '').toLowerCase();
+  if (filter === 'document') {
+    if (file.category === 'image') return false;
+    if (mime.startsWith('image/')) return false;
+    if (/\.(png|jpe?g|webp|bmp|gif|tiff?)$/i.test(name)) return false;
+    if (file.category === 'document') return true;
+    if (mime === 'application/vnd.google-apps.document') return true;
+    if (mime.includes('wordprocessingml') || mime === 'application/msword') return true;
+    if (mime === 'application/pdf' || name.endsWith('.pdf')) return true;
+    if (mime.startsWith('text/') || /\.(txt|md|rtf|docx?)$/i.test(name)) return true;
+    if (file.category === 'other' && canExtractText(file.mimeType, file.name) && !mime.startsWith('image/')) {
+      return true;
+    }
+    return false;
+  }
+  if (filter === 'spreadsheet') {
+    return (
+      file.category === 'spreadsheet' ||
+      mime === 'application/vnd.google-apps.spreadsheet' ||
+      mime.includes('spreadsheetml') ||
+      /\.(xlsx?|csv)$/i.test(name)
+    );
+  }
+  if (filter === 'presentation') {
+    return (
+      mime === 'application/vnd.google-apps.presentation' ||
+      mime.includes('presentationml') ||
+      /\.(pptx?|odp)$/i.test(name)
+    );
+  }
+  if (filter === 'pdf') {
+    return mime === 'application/pdf' || name.endsWith('.pdf');
+  }
+  if (filter === 'image') {
+    return file.category === 'image' || mime.startsWith('image/') || /\.(png|jpe?g|webp|bmp|gif|tiff?)$/i.test(name);
+  }
+  return file.category === filter;
+}
+
 export const SemanticSearch: React.FC<SemanticSearchProps> = ({
   files,
   folders,
   onSelectFile,
   onMoveFile,
+  onMoveFiles,
   onToggleStar,
   onToggleOffline,
   accessToken,
@@ -66,6 +116,7 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
   const [searchStatus, setSearchStatus] = useState('');
   const [resumeFrom, setResumeFrom] = useState(0);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const cancelIndexRef = useRef(false);
   const indexAbortRef = useRef<AbortController | null>(null);
   const wakeLockRef = useRef<WakeLockSentinel | null>(null);
@@ -94,7 +145,6 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
     return Boolean(lock);
   }, [releaseWakeLock]);
 
-  // Re-acquire wake lock when user returns to the tab during an active index run.
   useEffect(() => {
     const onVisibility = () => {
       if (document.visibilityState === 'visible' && indexingActiveRef.current) {
@@ -110,10 +160,13 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
 
   const buildIndexSignature = async (
     corpus: string,
-    extractable: DriveFile[]
+    extractable: DriveFile[],
+    scope: string
   ): Promise<string> => {
     const payload =
       corpus +
+      '|scope:' +
+      scope +
       '|' +
       extractable
         .map(f => f.id + ':' + (f.modifiedTime || ''))
@@ -125,7 +178,7 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
         .map(b => b.toString(16).padStart(2, '0'))
         .join('');
     } catch {
-      return corpus + ':' + String(extractable.length) + ':' + payload.length;
+      return corpus + ':' + scope + ':' + String(extractable.length) + ':' + payload.length;
     }
   };
   const readCursor = (sig: string, n: number): number => {
@@ -200,6 +253,41 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
     };
   }, [indexedCount, corpusKey]);
 
+  useEffect(() => {
+    const live = new Set(results.map(r => r.file.id));
+    setSelectedIds(prev => {
+      const next = new Set([...prev].filter(id => live.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [results]);
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const selectAllOnPage = () => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      for (const r of paginatedResults.items) next.add(r.file.id);
+      return next;
+    });
+  };
+
+  const clearSelection = () => setSelectedIds(new Set());
+
+  const handleBulkMove = () => {
+    const chosen = results.map(r => r.file).filter(f => selectedIds.has(f.id));
+    if (!chosen.length) return;
+    if (onMoveFiles) onMoveFiles(chosen);
+    else if (chosen.length === 1) onMoveFile(chosen[0]);
+    else onMoveFile(chosen[0]);
+  };
+
   const handleIndexContent = async () => {
     let token = accessToken || null;
     if (!token && onRequestToken) token = await onRequestToken();
@@ -209,10 +297,17 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
     }
 
     const extractable = files.filter(
-      f => f.isGoogleDriveItem && canExtractText(f.mimeType, f.name)
+      f =>
+        f.isGoogleDriveItem &&
+        canExtractText(f.mimeType, f.name) &&
+        matchesSearchCategory(f, selectedCategory)
     );
     if (!extractable.length) {
-      setIndexProgress('No text-extractable Drive files in current list');
+      setIndexProgress(
+        selectedCategory === 'all'
+          ? 'No text-extractable Drive files in current list'
+          : `No extractable files for filter "${selectedCategory}". Switch to All or Images to OCR photos.`
+      );
       return;
     }
 
@@ -224,10 +319,12 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
     setIndexing(true);
 
     const wakeOk = await requestWakeLock();
+    const scopeLabel =
+      selectedCategory === 'all' ? 'all extractable' : selectedCategory;
     if (wakeOk) {
-      setIndexProgress('Screen stay-awake on. Preparing…');
+      setIndexProgress(`Screen stay-awake on. Indexing ${scopeLabel} (${extractable.length})…`);
     } else {
-      setIndexProgress('Preparing… (keep this tab open; screen may sleep)');
+      setIndexProgress(`Indexing ${scopeLabel} (${extractable.length})… keep tab open`);
     }
 
     let ok = 0;
@@ -240,10 +337,10 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
     const embeddingProvider = isEmbedConfigured()
       ? createEmbeddingProvider(() => getFirebaseIdToken())
       : null;
-    const sig = await buildIndexSignature(corpusKey, extractable);
+    const sig = await buildIndexSignature(corpusKey, extractable, selectedCategory);
     let startAt = readCursor(sig, n);
     if (startAt > 0) {
-      setIndexProgress(`Resuming from ${startAt + 1}/${n}…`);
+      setIndexProgress(`Resuming from ${startAt + 1}/${n} (${scopeLabel})…`);
     }
 
     try {
@@ -370,7 +467,7 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
         clearCursor();
         setResumeFrom(0);
         setIndexProgress(
-          `Done. Indexed ${ok}, skipped fresh ${skippedFresh}, failed ${fail}` +
+          `Done (${scopeLabel}). Indexed ${ok}, skipped fresh ${skippedFresh}, failed ${fail}` +
             (embeddingFail ? `, embed fail ${embeddingFail}` : '') +
             (truncated ? `, truncated ${truncated}` : '') +
             (failedNames.length ? `. Failed: ${failedNames.join(', ')}` : '')
@@ -396,10 +493,11 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
       setCurrentPage(1);
       setSearching(true);
       try {
+        const scoped = files.filter(f => matchesSearchCategory(f, selectedCategory));
         const r = await runHybridSearch(
           query,
-          files,
-          selectedCategory,
+          scoped,
+          'all',
           corpusKey,
           setSearchStatus
         );
@@ -430,6 +528,7 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
           className="text-sm border rounded-lg px-2 py-2 bg-background"
           value={selectedCategory}
           onChange={e => setSelectedCategory(e.target.value)}
+          title="Filters search results and Index/Rebuild scope (Documents skips image OCR)"
         >
           <option value="all">All</option>
           <option value="google_drive">Google Drive</option>
@@ -466,8 +565,14 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
               type="button"
               className="px-2 py-0.5 rounded border hover:bg-zinc-100"
               onClick={handleIndexContent}
+              title={
+                selectedCategory === 'all'
+                  ? 'Index all extractable files (includes image OCR)'
+                  : `Index only "${selectedCategory}" files`
+              }
             >
               Index / Rebuild
+              {selectedCategory !== 'all' ? ` (${selectedCategory})` : ''}
             </button>
             {resumeFrom > 0 && (
               <button
@@ -489,6 +594,26 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
         )}
       </div>
 
+      {results.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <button type="button" className="px-2 py-0.5 rounded border hover:bg-zinc-100" onClick={selectAllOnPage}>
+            Select page ({paginatedResults.items.length})
+          </button>
+          <button type="button" className="px-2 py-0.5 rounded border hover:bg-zinc-100" onClick={clearSelection}>
+            Clear selection
+          </button>
+          <button
+            type="button"
+            disabled={selectedIds.size === 0}
+            className="inline-flex items-center gap-1 px-2 py-0.5 rounded border border-blue-500 text-blue-600 disabled:opacity-40"
+            onClick={handleBulkMove}
+          >
+            <FolderInput className="w-3.5 h-3.5" />
+            Move selected ({selectedIds.size})
+          </button>
+        </div>
+      )}
+
       <div className="flex-1 overflow-auto space-y-2">
         {searching && (
           <div className="flex items-center gap-2 text-sm text-zinc-500 p-3">
@@ -506,10 +631,27 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
               onClick={() => onSelectFile(r.file)}
             >
               <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <div className="font-medium text-sm truncate">{r.file.name}</div>
-                  <div className="text-xs text-zinc-500 mt-0.5">
-                    score {r.score} · {r.relevanceReason}
+                <div className="flex items-start gap-2 min-w-0">
+                  <button
+                    type="button"
+                    className="mt-0.5 shrink-0"
+                    title="Select for bulk move"
+                    onClick={e => {
+                      e.stopPropagation();
+                      toggleSelect(r.file.id);
+                    }}
+                  >
+                    {selectedIds.has(r.file.id) ? (
+                      <Check className="w-4 h-4 text-blue-600" />
+                    ) : (
+                      <span className="w-4 h-4 inline-block rounded border border-zinc-300 dark:border-zinc-600" />
+                    )}
+                  </button>
+                  <div className="min-w-0">
+                    <div className="font-medium text-sm truncate">{r.file.name}</div>
+                    <div className="text-xs text-zinc-500 mt-0.5">
+                      score {r.score} · {r.relevanceReason}
+                    </div>
                   </div>
                 </div>
                 <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -535,7 +677,7 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
                 </div>
               </div>
               {r.matchedSnippet && (
-                <p className="text-[11px] text-zinc-600 dark:text-zinc-400 leading-relaxed mt-1">
+                <p className="text-[11px] text-zinc-600 dark:text-zinc-400 leading-relaxed mt-1 ml-6">
                   {highlightSegments(r.matchedSnippet || '', query).map((seg, i) =>
                     seg.match ? (
                       <mark key={i} className="bg-amber-200/80 dark:bg-amber-500/30 rounded px-0.5">{seg.text}</mark>
