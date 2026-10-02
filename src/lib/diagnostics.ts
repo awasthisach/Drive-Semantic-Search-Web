@@ -9,7 +9,7 @@ export type DiagEvent = {
   message: string;
 };
 
-const MAX = 80;
+const MAX = 120;
 const LS_KEY = 'drive-semantic-diag-v1';
 const ring: DiagEvent[] = [];
 let inited = false;
@@ -20,7 +20,7 @@ function redact(s: string): string {
     .replace(/AIza[A-Za-z0-9_\-]+/g, '[key]')
     .replace(/Bearer\s+\S+/gi, 'Bearer [redacted]')
     .replace(/[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}/g, '[email]')
-    .slice(0, 400);
+    .slice(0, 500);
 }
 
 function persist(): void {
@@ -73,12 +73,37 @@ export function clearDiagnostics(): void {
   }
 }
 
+function runtimeSnapshot(): Record<string, unknown> {
+  const snap: Record<string, unknown> = {
+    href: typeof location !== 'undefined' ? location.href : '',
+    online: typeof navigator !== 'undefined' ? navigator.onLine : null,
+    visibility: typeof document !== 'undefined' ? document.visibilityState : null,
+    userAgent: typeof navigator !== 'undefined' ? String(navigator.userAgent || '').slice(0, 180) : '',
+  };
+  try {
+    if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
+      snap.swController = Boolean(navigator.serviceWorker.controller);
+    }
+  } catch {
+    /* ignore */
+  }
+  try {
+    const cursor = sessionStorage.getItem('content-index-cursor');
+    if (cursor) snap.indexCursor = cursor.slice(0, 80);
+  } catch {
+    /* ignore */
+  }
+  return snap;
+}
+
 export function exportDiagnosticsJson(): string {
   hydrate();
   return JSON.stringify(
     {
       exportedAt: new Date().toISOString(),
       note: 'Local-only. Tokens/emails redacted. No file bodies.',
+      runtime: runtimeSnapshot(),
+      eventCount: ring.length,
       events: getDiagnostics(),
     },
     null,
@@ -96,10 +121,12 @@ export function downloadDiagnostics(): void {
   URL.revokeObjectURL(url);
 }
 
+/** Must be called once at app boot so window errors and later logDiag persist. */
 export function initDiagnostics(): void {
   if (inited || typeof window === 'undefined') return;
   inited = true;
   hydrate();
+  logDiag('info', 'diagnostics', `init events=${ring.length}`);
   window.addEventListener('error', ev => {
     logDiag('error', 'window.error', ev.message || 'error');
   });
