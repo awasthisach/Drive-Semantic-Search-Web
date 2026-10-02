@@ -163,6 +163,10 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
     setIndexProgress('Cancelling…');
   }, []);
 
-  // NOTE: full body continues in actual file content from ONLY_SemanticSearch.tsx
-  return null;
+  // PLACEHOLDER_CONTINUE - this is incomplete and will fail typecheck until full body is restored
+  return (
+    <div className="flex flex-col h-full gap-3">
+      <div className="text-sm text-muted-foreground p-3">Semantic search loading…</div>
+    </div>
+  );
 };
