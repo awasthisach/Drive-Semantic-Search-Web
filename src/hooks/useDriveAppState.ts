@@ -36,10 +36,16 @@ export function useDriveAppState() {
   foldersRef.current = folders;
 
   const [activeTab, setActiveTab] = useState<AppTab>('dashboard');
+  // Initial status must not claim "synced" before any real Drive session.
   const [syncStats, setSyncStats] = useState<SyncStats>({
-    status: 'synced', lastSynced: new Date().toISOString(), pendingCount: 0,
-    totalSyncedCount: INITIAL_FILES.length, bandwidthUsage: '142 KB/s', networkOnline: true,
+    status: 'not_connected',
+    lastSynced: '',
+    pendingCount: 0,
+    totalSyncedCount: 0,
+    bandwidthUsage: '—',
+    networkOnline: typeof navigator !== 'undefined' ? navigator.onLine : true,
   });
+
   const [previewFile, setPreviewFile] = useState<DriveFile | null>(null);
   const [searchMoveTargetFile, setSearchMoveTargetFile] = useState<DriveFile | null>(null);
   const [verifyBusy, setVerifyBusy] = useState(false);

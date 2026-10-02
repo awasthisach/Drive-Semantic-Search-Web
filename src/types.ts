@@ -1,5 +1,15 @@
 export type FileCategory = 'document' | 'image' | 'spreadsheet' | 'code' | 'archive' | 'audio' | 'video' | 'other';
-export type DriveSyncStatus = 'synced' | 'syncing' | 'pending' | 'offline_only' | 'error';
+/** Explicit connection/sync state — do not default to 'synced' before a real Drive session. */
+export type DriveSyncStatus =
+  | 'not_connected'
+  | 'demo'
+  | 'connected'
+  | 'synced'
+  | 'syncing'
+  | 'pending'
+  | 'offline_only'
+  | 'error';
+
 
 export interface FolderItem {
   id: string;
@@ -80,7 +90,7 @@ export interface DeviceStorageFile {
   id: string;
   name: string;
   path: string;
-  source: StorageSource; // 'phone_internal' (फ़ोन मेमोरी) | 'sd_card' (SD कार्ड)
+  source: StorageSource; // 'phone_internal' (फोन मेमोरी) | 'sd_card' (SD कार्ड)
   size: number;
   mimeType: string;
   category: FileCategory;

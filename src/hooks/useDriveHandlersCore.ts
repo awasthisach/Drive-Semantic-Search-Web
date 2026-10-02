@@ -71,6 +71,13 @@ export function useDriveHandlersCore(s: DriveAppState) {
     setUserProfile(p => ({ ...p, name: 'Demo Drive', isConnected: true }));
     setFiles(INITIAL_FILES);
     setFolders(INITIAL_FOLDERS);
+    setSyncStats(s => ({
+      ...s,
+      status: 'demo',
+      lastSynced: new Date().toISOString(),
+      totalSyncedCount: INITIAL_FILES.length,
+      pendingCount: 0,
+    }));
     showDriveToast('Demo Google Drive Connected');
   };
 
@@ -164,6 +171,14 @@ export function useDriveHandlersCore(s: DriveAppState) {
       setUserProfile(p => ({ ...p, isConnected: false, email: '' }));
       setFiles(INITIAL_FILES);
       setFolders(INITIAL_FOLDERS);
+      setSyncStats(s => ({
+        ...s,
+        status: 'not_connected',
+        lastSynced: '',
+        totalSyncedCount: 0,
+        pendingCount: 0,
+        bandwidthUsage: '\u2014',
+      }));
       showDriveToast('Signed out and revoked Drive access');
     } catch (err) {
       console.error('Sign-out error:', err);
@@ -206,7 +221,6 @@ export function useDriveHandlersCore(s: DriveAppState) {
         onProgress: (p) => {
           progressiveFiles = progressiveFiles.concat(p.pageFiles);
           progressiveFolders = progressiveFolders.concat(p.pageFolders);
-          // Progressive UI: show partial list as pages arrive
           setFiles(prev => {
             const nonDrive = prev.filter(f => !f.isGoogleDriveItem);
             const seen = new Set(progressiveFiles.map(f => f.id));
@@ -248,13 +262,13 @@ export function useDriveHandlersCore(s: DriveAppState) {
           setGoogleAccessToken(refreshed);
           try {
             await runFetch(refreshed);
-            showDriveToast('Session refreshed — sync completed');
+            showDriveToast('Session refreshed \u2014 sync completed');
           } catch (retryErr: any) {
             showDriveToast('Sync failed after refresh: ' + (retryErr?.message || 'error'));
             setSyncStats(s => ({ ...s, status: 'error' }));
           }
         } else {
-          showDriveToast('Session expired — Sign in again');
+          showDriveToast('Session expired \u2014 Sign in again');
           setGoogleAccessToken(null);
           setIsGoogleConnected(false);
           setSyncStats(s => ({ ...s, status: 'error' }));

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { BackendEmbeddingProvider } from '../embeddings/client';
 import { EMBED_CONFIG } from '../embeddings/config';
+import { allowAllEmbeddingPolicy } from '../embeddings/consent';
 
 const vector = new Array(EMBED_CONFIG.dimension).fill(0.1);
 
@@ -21,7 +22,7 @@ describe('BackendEmbeddingProvider', () => {
 
   it('sends document mode without the unsupported taskType field', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(response());
-    const provider = new BackendEmbeddingProvider(async () => 'firebase-token');
+    const provider = new BackendEmbeddingProvider(async () => 'firebase-token', allowAllEmbeddingPolicy());
     await provider.embedDocuments(['document body']);
 
     const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
@@ -33,7 +34,7 @@ describe('BackendEmbeddingProvider', () => {
 
   it('sends query mode for query embeddings', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(response());
-    const provider = new BackendEmbeddingProvider(async () => 'firebase-token');
+    const provider = new BackendEmbeddingProvider(async () => 'firebase-token', allowAllEmbeddingPolicy());
     await provider.embedQuery('search phrase');
 
     const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
@@ -44,7 +45,7 @@ describe('BackendEmbeddingProvider', () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(JSON.stringify({ embeddings: [vector], model: EMBED_CONFIG.model, version: '1', dimension: EMBED_CONFIG.dimension }), { status: 200 })
     );
-    const provider = new BackendEmbeddingProvider(async () => 'firebase-token');
+    const provider = new BackendEmbeddingProvider(async () => 'firebase-token', allowAllEmbeddingPolicy());
     await expect(provider.embedQuery('stale')).rejects.toThrow(/version mismatch/i);
   });
 });
