@@ -19,13 +19,13 @@ import { isEmbedConfigured } from '../lib/embeddings/config';
 import { createEmbeddingProvider } from '../lib/embeddings/client';
 import { getFirebaseIdToken } from '../lib/firebaseAuth';
 import { paginateResults } from '../lib/pagination';
+import { logDiag } from '../lib/diagnostics';
 
 interface SemanticSearchProps {
   files: DriveFile[];
   folders: FolderItem[];
   onSelectFile: (file: DriveFile) => void;
   onMoveFile: (file: DriveFile) => void;
-  /** Bulk move from search results (preferred when selecting multiple). */
   onMoveFiles?: (files: DriveFile[]) => void;
   onToggleStar: (id: string) => void;
   onToggleOffline: (id: string) => void;
@@ -34,7 +34,6 @@ interface SemanticSearchProps {
   corpusKey: string;
 }
 
-/** Keep screen awake while indexing so mobile browsers are less likely to throttle extract. */
 async function acquireScreenWakeLock(): Promise<WakeLockSentinel | null> {
   try {
     if (typeof navigator === 'undefined' || !('wakeLock' in navigator)) return null;
@@ -46,10 +45,6 @@ async function acquireScreenWakeLock(): Promise<WakeLockSentinel | null> {
   }
 }
 
-/**
- * Match Search category dropdown to files for both search and index scope.
- * Important: "Documents" must NOT include images (no OCR of screenshots).
- */
 export function matchesSearchCategory(file: DriveFile, filter: string): boolean {
   if (!filter || filter === 'all') return true;
   if (filter === 'google_drive') return Boolean(file.isGoogleDriveItem);
@@ -293,6 +288,7 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
     if (!token && onRequestToken) token = await onRequestToken();
     if (!token) {
       setIndexProgress('Sign in required to extract Drive content');
+      logDiag('warn', 'index', 'sign-in required');
       return;
     }
 
@@ -303,13 +299,19 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
         matchesSearchCategory(f, selectedCategory)
     );
     if (!extractable.length) {
-      setIndexProgress(
+      const msg =
         selectedCategory === 'all'
           ? 'No text-extractable Drive files in current list'
-          : `No extractable files for filter "${selectedCategory}". Switch to All or Images to OCR photos.`
-      );
+          : `No extractable files for filter "${selectedCategory}". Switch to All or Images to OCR photos.`;
+      setIndexProgress(msg);
+      logDiag('warn', 'index', msg);
       return;
     }
+    logDiag(
+      'info',
+      'index',
+      `start scope=${selectedCategory} extractable=${extractable.length} files=${files.length}`
+    );
 
     cancelIndexRef.current = false;
     indexAbortRef.current?.abort();
@@ -352,6 +354,7 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
                 ? ` Failed: ${failedNames.join(', ')}${fail > failedNames.length ? '…' : ''}`
                 : '')
           );
+          logDiag('info', 'index', `cancelled mid-run at ${i}/${extractable.length}`);
           break;
         }
 
@@ -404,6 +407,7 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
           if (cancelIndexRef.current || indexController.signal.aborted) {
             writeCursor(sig, i);
             setIndexProgress(`Cancelled at ${i}/${extractable.length}. Resume available.`);
+            logDiag('info', 'index', `cancelled at ${i}`);
             break;
           }
 
@@ -439,6 +443,7 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
               if (embedding.failed) embeddingFail++;
             } catch (embedErr) {
               console.warn('[SemanticSearch] embed skipped for', f.name, embedErr);
+              logDiag('warn', 'index.embed', `skip ${f.name}: ${embedErr instanceof Error ? embedErr.message : String(embedErr)}`);
               embeddingFail++;
             }
           }
@@ -454,11 +459,13 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
           ) {
             writeCursor(sig, i);
             setIndexProgress(`Cancelled / timed out at ${i}/${extractable.length}. Resume available.`);
+            logDiag('warn', 'index', `abort/timeout at ${i}`);
             break;
           }
           fail++;
           if (failedNames.length < 5) failedNames.push(f.name);
           console.warn('[SemanticSearch] index failed for', f.name, err);
+          logDiag('warn', 'index.file', `fail ${f.name}: ${err?.message || err}`);
           writeCursor(sig, i + 1);
         }
       }
@@ -466,12 +473,13 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
       if (!cancelIndexRef.current && !indexController.signal.aborted) {
         clearCursor();
         setResumeFrom(0);
-        setIndexProgress(
+        const doneMsg =
           `Done (${scopeLabel}). Indexed ${ok}, skipped fresh ${skippedFresh}, failed ${fail}` +
             (embeddingFail ? `, embed fail ${embeddingFail}` : '') +
             (truncated ? `, truncated ${truncated}` : '') +
-            (failedNames.length ? `. Failed: ${failedNames.join(', ')}` : '')
-        );
+            (failedNames.length ? `. Failed: ${failedNames.join(', ')}` : '');
+        setIndexProgress(doneMsg);
+        logDiag('info', 'index', doneMsg);
       }
     } finally {
       indexingActiveRef.current = false;
@@ -554,6 +562,7 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
                 cancelIndexRef.current = true;
                 indexAbortRef.current?.abort();
                 setIndexProgress('Cancelling…');
+                logDiag('info', 'index', 'cancel requested');
               }}
             >
               Cancel
@@ -655,14 +664,7 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
                   </div>
                 </div>
                 <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <button
-                    type="button"
-                    title="Star"
-                    onClick={e => {
-                      e.stopPropagation();
-                      onToggleStar(r.file.id);
-                    }}
-                  >
+                  <button type="button" title="Star" onClick={e => { e.stopPropagation(); onToggleStar(r.file.id); }}>
                     <Star className={`w-4 h-4 ${r.file.starred ? 'fill-yellow-400 text-yellow-500' : 'text-zinc-400'}`} />
                   </button>
                   <button type="button" title="Pin offline" onClick={e => { e.stopPropagation(); onToggleOffline(r.file.id); }}>

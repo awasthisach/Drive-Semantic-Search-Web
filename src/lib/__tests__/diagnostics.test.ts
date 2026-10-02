@@ -15,8 +15,8 @@ describe('diagnostics', () => {
   });
 
   it('caps ring size', () => {
-    for (let i = 0; i < 100; i++) logDiag('info', 't', 'n' + i);
-    expect(getDiagnostics().length).toBe(80);
+    for (let i = 0; i < 150; i++) logDiag('info', 't', 'n' + i);
+    expect(getDiagnostics().length).toBe(120);
   });
 
   it('export is valid JSON without file bodies field', () => {
@@ -24,5 +24,7 @@ describe('diagnostics', () => {
     const j = JSON.parse(exportDiagnosticsJson());
     expect(Array.isArray(j.events)).toBe(true);
     expect(j.note).toMatch(/Local-only/);
+    expect(j.eventCount).toBe(1);
+    expect(j.runtime).toBeTruthy();
   });
 });

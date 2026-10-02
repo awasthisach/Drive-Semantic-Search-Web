@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import App from './App.tsx';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import './index.css';
+import { initDiagnostics, logDiag } from './lib/diagnostics';
 
 /**
  * Permanent cache-bust for GitHub Pages PWA:
@@ -10,6 +11,8 @@ import './index.css';
  * - on controllerchange we reload once so hashed JS/CSS from the new deploy load
  * - periodic update checks catch deploys while the tab stays open
  */
+initDiagnostics();
+
 function setupServiceWorkerUpdate() {
   if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return;
 
@@ -25,6 +28,7 @@ function setupServiceWorkerUpdate() {
     }
     refreshing = true;
     sessionStorage.setItem(RELOAD_KEY, '1');
+    logDiag('info', 'sw', 'controllerchange reload');
     window.location.reload();
   });
 
