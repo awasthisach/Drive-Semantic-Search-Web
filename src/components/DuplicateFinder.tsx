@@ -1,8 +1,10 @@
 import React, { useMemo, useState } from 'react';
 import { Copy, Trash2, CheckCircle, Check, FileText, FolderInput, Sparkles, Loader2 } from 'lucide-react';
 import { DriveFile } from '../types';
-import { findDuplicates, findSemanticDuplicatesFromVectors, SemanticDuplicateGroup } from '../lib/duplicateEngine';
+import { analyzeSemanticDuplicatesFromVectors, findDuplicates, SemanticDuplicateGroup, UncertainSemanticPair } from '../lib/duplicateEngine';
 import { countVectors, listVectors } from '../lib/vectorIndex';
+import { isLegacyTitleEmbeddingChunk } from '../lib/contentIndex';
+import { EMBED_CONFIG } from '../lib/embeddings/config';
 import { MoveToFolderModal } from './MoveToFolderModal';
 import { formatBytes } from '../lib/driveApi';
 
@@ -15,6 +17,8 @@ interface DuplicateFinderProps {
   onCreateFolder: (folder: import('../types').FolderItem) => void;
   onVerifyHashes?: (fileIds: string[]) => Promise<void>;
   verifyBusy?: boolean;
+  onDeepCheck?: (fileIds: string[]) => Promise<void>;
+  deepCheckBusy?: boolean;
 }
 
 const SEMANTIC_THRESHOLDS = [
@@ -23,11 +27,12 @@ const SEMANTIC_THRESHOLDS = [
   { value: 0.95, label: '95%', name: 'Strict', help: 'Only very similar content.' },
 ] as const;
 
-export const DuplicateFinder: React.FC<DuplicateFinderProps> = ({ files, folders, corpusKey, onRemoveFiles, onMoveFiles, onCreateFolder, onVerifyHashes, verifyBusy }) => {
+export const DuplicateFinder: React.FC<DuplicateFinderProps> = ({ files, folders, corpusKey, onRemoveFiles, onMoveFiles, onCreateFolder, onVerifyHashes, verifyBusy, onDeepCheck, deepCheckBusy }) => {
   const [selectedDuplicates, setSelectedDuplicates] = useState<Set<string>>(() => new Set());
   const [selectedForMove, setSelectedForMove] = useState<Set<string>>(() => new Set());
   const [showMoveModal, setShowMoveModal] = useState(false);
   const [semanticGroups, setSemanticGroups] = useState<SemanticDuplicateGroup[]>([]);
+  const [uncertainPairs, setUncertainPairs] = useState<UncertainSemanticPair[]>([]);
   const [semanticThreshold, setSemanticThreshold] = useState(0.9);
   const [semanticBusy, setSemanticBusy] = useState(false);
   const [semanticStatus, setSemanticStatus] = useState('');
@@ -73,15 +78,37 @@ export const DuplicateFinder: React.FC<DuplicateFinderProps> = ({ files, folders
     setSemanticBusy(true);
     setSemanticStatus('Comparing indexed file profiles…');
     try {
-      const vectors = await listVectors(corpusKey);
-      const groups = findSemanticDuplicatesFromVectors(files, vectors, semanticThreshold);
-      setSemanticGroups(groups);
-      setSemanticStatus(groups.length
-        ? `${groups.length} group(s) found at ${Math.round(semanticThreshold * 100)}%. Review files before moving.`
-        : `No near-duplicate groups found at ${Math.round(semanticThreshold * 100)}%. Try 85% for a broader review.`);
+      const vectors = (await listVectors(corpusKey)).filter(vector =>
+        vector.embeddingModel === EMBED_CONFIG.model &&
+        vector.embeddingVersion === EMBED_CONFIG.version &&
+        vector.dimension === EMBED_CONFIG.dimension
+      );
+      if (!vectors.length) {
+        setSemanticGroups([]);
+        setUncertainPairs([]);
+        setSemanticStatus('No compatible current-model vectors found. In Search, enable embeddings and run Index / Rebuild before scanning.');
+        return;
+      }
+      const liveIds = new Set(files.map(file => file.id));
+      const legacyProfileIds = new Set(vectors
+        .filter(vector => liveIds.has(vector.fileId) && isLegacyTitleEmbeddingChunk(vector.text))
+        .map(vector => vector.fileId));
+      if (legacyProfileIds.size) {
+        setSemanticGroups([]);
+        setUncertainPairs([]);
+        setSemanticStatus(`${legacyProfileIds.size} live profile(s) still include filenames in their vectors. In Search, set scope to All and click Index / Rebuild once, then scan again.`);
+        return;
+      }
+      const analysis = analyzeSemanticDuplicatesFromVectors(files, vectors, semanticThreshold);
+      setSemanticGroups(analysis.groups);
+      setUncertainPairs(analysis.uncertainPairs);
+      setSemanticStatus(analysis.groups.length || analysis.uncertainPairs.length
+        ? `${analysis.groups.length} likely group(s), ${analysis.uncertainPairs.length} borderline pair(s) at ${Math.round(semanticThreshold * 100)}%. Similarity is review-only.`
+        : `No likely or borderline duplicate pairs at ${Math.round(semanticThreshold * 100)}%. Try a broader threshold.`);
     } catch (error) {
       console.warn('[DuplicateFinder] semantic duplicate scan failed', error);
       setSemanticGroups([]);
+      setUncertainPairs([]);
       setSemanticStatus('Semantic scan unavailable; index content first.');
     } finally {
       setSemanticBusy(false);
@@ -91,7 +118,25 @@ export const DuplicateFinder: React.FC<DuplicateFinderProps> = ({ files, folders
   const handleThresholdChange = (value: number) => {
     setSemanticThreshold(value);
     setSemanticGroups([]);
+    setUncertainPairs([]);
     setSemanticStatus('Threshold changed. Scan again to refresh results.');
+  };
+
+  const handleDeepCheck = async (pair: UncertainSemanticPair) => {
+    if (!onDeepCheck) {
+      setSemanticStatus('Expanded OCR is unavailable in this session.');
+      return;
+    }
+    try {
+      setSemanticStatus('Checking selected PDFs with up to five additional middle pages…');
+      await onDeepCheck(pair.files.map(file => file.id));
+      setSemanticGroups([]);
+      setUncertainPairs([]);
+      setSemanticStatus('Expanded page samples updated. Run the semantic duplicate scan again.');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setSemanticStatus(`Expanded OCR failed: ${message}`);
+    }
   };
 
   const selectSemanticGroup = (group: SemanticDuplicateGroup) => {
@@ -167,7 +212,7 @@ export const DuplicateFinder: React.FC<DuplicateFinderProps> = ({ files, folders
               <div className="flex items-center gap-2 flex-wrap">
                 <h2 className="text-lg sm:text-xl font-bold tracking-tight">Duplicate Candidate Cleaner</h2>
                 <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                  Size/name · sha256 when verified
+                  SHA-256 · semantic · size/name candidates
                 </span>
               </div>
               <p className="text-xs sm:text-sm text-zinc-400 mt-1 max-w-xl">
@@ -183,7 +228,7 @@ export const DuplicateFinder: React.FC<DuplicateFinderProps> = ({ files, folders
         </div>
       </div>
 
-      {duplicateGroups.length === 0 && semanticGroups.length === 0 ? (
+      {duplicateGroups.length === 0 && semanticGroups.length === 0 && uncertainPairs.length === 0 ? (
         <div className="text-center py-12 rounded-2xl border border-dashed border-zinc-300 dark:border-zinc-800 space-y-3">
           <CheckCircle className="w-12 h-12 text-emerald-500 mx-auto" />
           <h3 className="text-base font-bold">No exact candidate groups</h3>
@@ -253,10 +298,10 @@ export const DuplicateFinder: React.FC<DuplicateFinderProps> = ({ files, folders
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
                 <div className="flex items-center gap-2 text-sm font-bold"><Sparkles className="w-4 h-4 text-indigo-500" /> Semantic near-duplicate review</div>
-                <p className="text-[11px] text-zinc-500 mt-1">Uses indexed embeddings to find similar content. Similar is not proof of duplication; trash stays locked to SHA-256.</p>
+                <p className="text-[11px] text-zinc-500 mt-1">Compares multiple content chunks in order, not names or file sizes. Same-topic files are not proof of duplicates; results are review-only and trash stays locked to SHA-256.</p>
               </div>
               <div className="flex items-center gap-2">
-                <span className="text-[11px] text-zinc-500">Similarity</span>
+                <span className="text-[11px] text-zinc-500">Content match</span>
                 <div className="flex gap-1" role="group" aria-label="Semantic similarity threshold">
                   {SEMANTIC_THRESHOLDS.map(option => <button key={option.value} type="button" onClick={() => handleThresholdChange(option.value)} aria-pressed={semanticThreshold === option.value} title={`${option.name}: ${option.help}`} className={`px-2 py-1.5 rounded-lg border text-[11px] font-semibold ${semanticThreshold === option.value ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white dark:bg-zinc-900 border-zinc-300 dark:border-zinc-700'}`}>{option.label}</button>)}
                 </div>
@@ -269,10 +314,36 @@ export const DuplicateFinder: React.FC<DuplicateFinderProps> = ({ files, folders
             {semanticStatus && <p className="text-[11px] text-zinc-600 dark:text-zinc-400" role="status">{semanticStatus}</p>}
             {semanticGroups.map((group, index) => (
               <div key={`${index}-${group.files.map(file => file.id).join('-')}`} className="rounded-xl border border-indigo-200/70 dark:border-indigo-900/60 bg-white/70 dark:bg-zinc-900/60 p-3">
-                <div className="flex items-center justify-between gap-2 mb-2"><span className="text-xs font-bold text-indigo-700 dark:text-indigo-300" title="Strongest direct pair in this connected group. Some members may be linked indirectly; review before acting.">Best pair similarity {Math.round(group.bestPairSimilarity * 100)}%</span><button type="button" onClick={() => selectSemanticGroup(group)} className="text-[11px] text-indigo-600 hover:underline">Select non-primary for move</button></div>
+                <div className="flex items-center justify-between gap-2 mb-2"><span className="text-xs font-bold text-indigo-700 dark:text-indigo-300" title="Strongest direct aligned-chunk overlap score in this connected group. Some members may be linked indirectly; review before acting.">Best direct content-match score {Math.round(group.bestPairSimilarity * 100)}%</span><button type="button" onClick={() => selectSemanticGroup(group)} className="text-[11px] text-indigo-600 hover:underline">Select non-primary for move</button></div>
                 <div className="space-y-1">{group.files.map(file => <label key={file.id} className="flex items-center gap-2 text-xs"><input type="checkbox" checked={selectedForMove.has(file.id)} onChange={() => toggleMove(file.id)} /><span className="truncate">{file.name}</span></label>)}</div>
               </div>
             ))}
+            {uncertainPairs.length > 0 && (
+              <div className="rounded-xl border border-amber-300 dark:border-amber-800 bg-amber-50/70 dark:bg-amber-950/20 p-3 space-y-2">
+                <div className="text-xs font-bold text-amber-800 dark:text-amber-300">Borderline pairs · more evidence may help</div>
+                <p className="text-[11px] text-zinc-600 dark:text-zinc-400">These pairs are within five points below the selected score. For PDFs, deep-checking adds up to five middle pages to the sample; it does not OCR the whole book.</p>
+                {uncertainPairs.map(pair => {
+                  const hasDrivePdf = pair.files.some(file => file.isGoogleDriveItem && (file.mimeType === 'application/pdf' || /\.pdf$/i.test(file.name)));
+                  return (
+                    <div key={pair.files.map(file => file.id).sort().join('|')} className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-t border-amber-200 dark:border-amber-900 pt-2">
+                      <span className="text-[11px] truncate">{pair.files[0].name} ↔ {pair.files[1].name} · {Math.round(pair.similarity * 100)}%</span>
+                      {hasDrivePdf ? (
+                        <button
+                          type="button"
+                          disabled={deepCheckBusy || !onDeepCheck}
+                          onClick={() => void handleDeepCheck(pair)}
+                          className="shrink-0 px-2 py-1 rounded border border-amber-400 text-amber-800 dark:text-amber-200 text-[10px] font-semibold disabled:opacity-50"
+                        >
+                          {deepCheckBusy ? 'Checking…' : 'Expand PDF sample'}
+                        </button>
+                      ) : (
+                        <span className="shrink-0 text-[10px] text-zinc-500">No Drive PDF to expand</span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           {duplicateGroups.map(group => {

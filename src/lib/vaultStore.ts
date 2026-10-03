@@ -46,6 +46,16 @@ export async function loadVaultFiles(): Promise<VaultFile[]> {
   }
 }
 
+/** Strict read for backup export; stored payloads remain encrypted. */
+export async function exportVaultFilesForBackup(): Promise<VaultFile[]> {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const req = db.transaction(STORE, 'readonly').objectStore(STORE).getAll();
+    req.onsuccess = () => resolve((req.result || []) as VaultFile[]);
+    req.onerror = () => reject(req.error || new Error('Could not read vault records for backup'));
+  });
+}
+
 export async function saveVaultFile(file: VaultFile): Promise<void> {
   const db = await openDb();
   return new Promise((resolve, reject) => {

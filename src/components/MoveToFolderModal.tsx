@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Folder,
   FolderPlus,
@@ -9,6 +9,7 @@ import {
   CheckCircle2,
 } from 'lucide-react';
 import { DriveFile, FolderItem } from '../types';
+import { buildFolderPathLabel } from '../lib/categorySuggestions';
 
 interface MoveToFolderModalProps {
   isOpen: boolean;
@@ -16,6 +17,7 @@ interface MoveToFolderModalProps {
   selectedFiles: DriveFile[];
   folders: FolderItem[];
   allFiles: DriveFile[];
+  suggestedFolderId?: string;
   onConfirmMove: (targetFolderId: string | undefined) => void;
   onCreateFolder: (folder: FolderItem) => void;
 }
@@ -35,13 +37,23 @@ export const MoveToFolderModal: React.FC<MoveToFolderModalProps> = ({
   selectedFiles,
   folders,
   allFiles,
+  suggestedFolderId,
   onConfirmMove,
   onCreateFolder,
 }) => {
-  const [selectedFolderId, setSelectedFolderId] = useState<string | 'root'>('root');
+  const initialFolderId = suggestedFolderId && folders.some(folder => folder.id === suggestedFolderId)
+    ? suggestedFolderId
+    : 'root';
+  const [selectedFolderId, setSelectedFolderId] = useState<string | 'root'>(initialFolderId);
   const [showCreateFolder, setShowCreateFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
   const [newFolderColor, setNewFolderColor] = useState('blue');
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const suggestionIsValid = suggestedFolderId && folders.some(folder => folder.id === suggestedFolderId);
+    setSelectedFolderId(suggestionIsValid ? suggestedFolderId : 'root');
+  }, [isOpen, suggestedFolderId, folders]);
 
   if (!isOpen) return null;
 
@@ -71,7 +83,10 @@ export const MoveToFolderModal: React.FC<MoveToFolderModalProps> = ({
   };
   const selectedFolderLabel = selectedFolderId === 'root'
     ? 'Main Drive (Root / Unfiled)'
-    : folders.find(folder => folder.id === selectedFolderId)?.name || 'Selected folder';
+    : (() => {
+        const folder = folders.find(item => item.id === selectedFolderId);
+        return folder ? buildFolderPathLabel(folder, folders) : 'Selected folder';
+      })();
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-150">
@@ -89,7 +104,7 @@ export const MoveToFolderModal: React.FC<MoveToFolderModalProps> = ({
               <h3 className="text-base font-bold text-zinc-900 dark:text-zinc-100">
                 Move {selectedFiles.length} {selectedFiles.length === 1 ? 'File' : 'Files'}
               </h3>
-              <p className="text-xs text-zinc-500">Select target folder or create a new one</p>
+              <p className="text-xs text-zinc-500">{suggestedFolderId ? 'Suggestion preselected; confirm manually below' : 'Select target folder or create a new one'}</p>
             </div>
           </div>
           <button
@@ -174,7 +189,7 @@ export const MoveToFolderModal: React.FC<MoveToFolderModalProps> = ({
                   </div>
                   <div className="min-w-0">
                     <h4 className="text-xs sm:text-sm font-semibold text-zinc-900 dark:text-zinc-100 truncate">
-                      {folder.name}
+                      {buildFolderPathLabel(folder, folders)}
                     </h4>
                     <p className="text-[11px] text-zinc-500 truncate">
                       {count} {count === 1 ? 'file' : 'files'}

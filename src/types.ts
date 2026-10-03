@@ -17,6 +17,8 @@ export interface FolderItem {
   color: string;
   description?: string;
   createdAt?: string;
+  /** Google Drive parent folder IDs, used to build a human-readable category path. */
+  parentIds?: string[];
 }
 
 export interface DriveFile {
@@ -82,7 +84,7 @@ export interface SyncStats {
   networkOnline: boolean;
 }
 
-export type AppTab = 'dashboard' | 'storage_scanner' | 'vault' | 'duplicates' | 'search' | 'offline';
+export type AppTab = 'dashboard' | 'storage_scanner' | 'vault' | 'duplicates' | 'search' | 'offline' | 'backup';
 
 export type StorageSource = 'phone_internal' | 'sd_card';
 

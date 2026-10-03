@@ -316,6 +316,35 @@ export async function listVectors(corpusKey?: string): Promise<VectorRecord[]> {
   }
 }
 
+/** Strict export for encrypted local backups; the ordinary UI list helper is best-effort. */
+export async function exportVectorRecordsForBackup(): Promise<VectorRecord[]> {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const req = db.transaction(VECTOR_STORE, 'readonly').objectStore(VECTOR_STORE).getAll();
+    req.onsuccess = () => resolve((req.result || []) as VectorRecord[]);
+    req.onerror = () => reject(req.error || new Error('Could not read semantic vectors for backup'));
+  });
+}
+
+/** Merge validated vector records from a backup and rebuild their derived ANN bucket keys. */
+export async function restoreVectorRecordsFromBackup(records: VectorRecord[]): Promise<number> {
+  if (!records.length) return 0;
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(VECTOR_STORE, 'readwrite');
+    const store = tx.objectStore(VECTOR_STORE);
+    for (const record of records) {
+      store.put({
+        ...record,
+        annBuckets: annBucketKeys(record.embedding, record.corpusKey),
+      });
+    }
+    tx.oncomplete = () => resolve(records.length);
+    tx.onerror = () => reject(tx.error || new Error('Could not restore semantic vectors'));
+    tx.onabort = () => reject(tx.error || new Error('Semantic vector restore was aborted'));
+  });
+}
+
 export async function countVectors(corpusKey?: string): Promise<number> {
   try {
     const db = await openDb();
