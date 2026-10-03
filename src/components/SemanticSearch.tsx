@@ -445,25 +445,15 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
             return;
           }
 
-          await putIndexedDocument({
-            id: f.id,
-            name: f.name,
-            mimeType: f.mimeType || '',
-            text: text.slice(0, MAX_INDEX_CHARS),
-            source,
-            driveModifiedTime: f.modifiedTime,
-            textTruncated: textWasTruncated,
-            extractionPolicyVersion,
-            pdfCoverage,
-            corpusKey,
-          });
+          const indexedText = text.slice(0, MAX_INDEX_CHARS);
+          const chunks = buildEmbeddingChunks(f.name, indexedText);
 
-          if (textWasTruncated) truncated++;
-          if (pdfCoverage && pdfCoverage.deferredPageCount > 0) sampledPdf++;
-
+          // Stage semantic vectors before replacing a stale text document. This
+          // prevents a failed embedding request from leaving a new text index
+          // paired with old semantic vectors. embedAndStoreChunks atomically
+          // replaces only after the complete new embedding batch succeeds.
           if (embeddingProvider) {
             try {
-              const chunks = buildEmbeddingChunks(f.name, text.slice(0, MAX_INDEX_CHARS));
               const embedding = await embedAndStoreChunks({
                 provider: embeddingProvider,
                 fileId: f.id,
@@ -471,14 +461,43 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
                 corpusKey,
                 driveModifiedTime: f.modifiedTime,
               });
-              if (embedding.failed) embeddingFail++;
+              if (embedding.failed) {
+                embeddingFail++;
+                fail++;
+                if (failedNames.length < 5) failedNames.push(f.name);
+                logDiag('warn', 'index.embed', `staged embedding failed; retained prior index for ${f.name}`);
+                markCompleted(i);
+                return;
+              }
             } catch (embedErr) {
-              console.warn('[SemanticSearch] embed skipped for', f.name, embedErr);
-              logDiag('warn', 'index.embed', `skip ${f.name}: ${embedErr instanceof Error ? embedErr.message : String(embedErr)}`);
+              console.warn('[SemanticSearch] staged embed failed for', f.name, embedErr);
+              logDiag('warn', 'index.embed', `staged embed failed; retained prior index for ${f.name}: ${embedErr instanceof Error ? embedErr.message : String(embedErr)}`);
               embeddingFail++;
+              fail++;
+              if (failedNames.length < 5) failedNames.push(f.name);
+              markCompleted(i);
+              return;
             }
           }
 
+          await putIndexedDocument({
+            id: f.id,
+            name: f.name,
+            mimeType: f.mimeType || '',
+            text: indexedText,
+            source,
+            driveModifiedTime: f.modifiedTime,
+            textTruncated: textWasTruncated,
+            extractionPolicyVersion,
+            pdfCoverage,
+            corpusKey,
+            // The vector store was staged successfully above when embeddings
+            // are enabled; do not remove the freshly stored vectors.
+            preserveVectors: Boolean(embeddingProvider),
+          });
+
+          if (textWasTruncated) truncated++;
+          if (pdfCoverage && pdfCoverage.deferredPageCount > 0) sampledPdf++;
           ok++;
           markCompleted(i);
         } catch (err: any) {
