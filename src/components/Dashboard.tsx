@@ -9,7 +9,6 @@ import { runSemanticSearch } from '../lib/searchEngine';
 import { DriveFileTypeFilter, DriveCorpus, SharedDriveInfo } from '../lib/googleDriveService';
 import { FileTypeSelector } from './FileTypeSelector';
 import { MoveToFolderModal } from './MoveToFolderModal';
-import { DeleteConfirmModal } from './DeleteConfirmModal';
 
 interface DashboardProps {
   files: DriveFile[];
@@ -17,8 +16,6 @@ interface DashboardProps {
   vaultFiles: VaultFile[];
   onUploadFile: (newFile: DriveFile) => void;
   onUploadToDrive?: (file: File) => Promise<void>;
-  onDeleteFile: (id: string) => void;
-  onDeleteMultipleFiles: (ids: string[]) => void;
   onMoveFilesToFolder: (fileIds: string[], targetFolderId: string | undefined) => void;
   onCreateFolder: (newFolder: FolderItem) => void;
   onToggleStar: (id: string) => void;
@@ -41,7 +38,7 @@ interface DashboardProps {
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({
-  files, folders, vaultFiles, onUploadFile, onUploadToDrive, onDeleteFile, onDeleteMultipleFiles,
+  files, folders, vaultFiles, onUploadFile, onUploadToDrive,
   onMoveFilesToFolder, onCreateFolder, onToggleStar, onToggleOffline, onSelectTab,
   onSelectPreviewFile, isGoogleConnected = false, isGoogleLoading = false,
   googleUserEmail = '', onConnectGoogleDrive, onConnectDemoDrive, onSyncGoogleDrive,
@@ -53,8 +50,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [selectedFileIds, setSelectedFileIds] = useState<Set<string>>(new Set());
   const [isMoveModalOpen, setIsMoveModalOpen] = useState(false);
   const [moveTargetFiles, setMoveTargetFiles] = useState<DriveFile[]>([]);
-  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
-  const [deleteTargetFiles, setDeleteTargetFiles] = useState<DriveFile[]>([]);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const PAGE_SIZE = 60;
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
@@ -272,7 +267,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
             >
               <FolderInput className="w-3.5 h-3.5" /> Move to folder
             </button>
-            <button type="button" className="px-2 py-1.5 rounded-lg border text-red-600 font-semibold" onClick={() => { setDeleteTargetFiles(selectedFilesList); setIsDeleteModalOpen(true); }}>Delete</button>
+
             <button type="button" className="px-2 py-1.5 rounded-lg border" onClick={() => setSelectedFileIds(new Set())}>Clear</button>
           </>
         )}
@@ -346,17 +341,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
         }}
         onCreateFolder={onCreateFolder}
       />
-      <DeleteConfirmModal
-        isOpen={isDeleteModalOpen}
-        onClose={() => setIsDeleteModalOpen(false)}
-        filesToDelete={deleteTargetFiles}
-        onConfirmDelete={() => {
-          onDeleteMultipleFiles(deleteTargetFiles.map(f => f.id));
-          setIsDeleteModalOpen(false);
-          setSelectedFileIds(new Set());
-          showToast('Delete requested');
-        }}
-      />
+
     </div>
   );
 };
