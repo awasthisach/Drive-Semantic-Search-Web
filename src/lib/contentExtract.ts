@@ -7,7 +7,7 @@
 
 import { fetchWithBackoff } from './rateLimit';
 import { MAX_INDEX_CHARS } from './contentIndex';
-import { extractDocxText, extractXlsxText } from './binaryOfficeExtract';
+import { extractDocxText, extractPptxText, extractXlsxText } from './binaryOfficeExtract';
 import {
   extractPdfTextWithOcr,
   ocrImage,
@@ -21,12 +21,14 @@ const TEXTISH = [
   'text/plain', 'text/csv', 'text/markdown', 'text/html',
   'application/json', 'application/xml', 'text/xml',
 ];
-const BINARY_EXTENSIONS = /\.(pdf|docx|xlsx)$/i;
+const BINARY_EXTENSIONS = /\.(pdf|docx|docm|xlsx|xlsm|pptx|pptm)$/i;
 const IMAGE_EXTENSIONS = /\.(png|jpe?g|webp|bmp|gif|tiff?)$/i;
 const BINARY_MIMES = new Set([
   'application/pdf',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  'application/vnd.ms-powerpoint.presentation.macroEnabled.12',
 ]);
 const IMAGE_MIMES = new Set([
   'image/png', 'image/jpeg', 'image/webp', 'image/bmp', 'image/gif', 'image/tiff',
@@ -168,8 +170,12 @@ export async function extractDriveFileText(
         const text = await extractDocxText(buffer);
         return { text: text.slice(0, MAX_INDEX_CHARS), source: 'binary-text', truncated: truncated || text.length > MAX_INDEX_CHARS };
       }
-      if (m.includes('spreadsheetml') || extension === 'xlsx') {
+      if (m.includes('spreadsheetml') || extension === 'xlsx' || extension === 'xlsm') {
         const text = await extractXlsxText(buffer);
+        return { text: text.slice(0, MAX_INDEX_CHARS), source: 'binary-text', truncated: truncated || text.length > MAX_INDEX_CHARS };
+      }
+      if (m.includes('presentationml') || m.includes('ms-powerpoint') || extension === 'pptx' || extension === 'pptm') {
+        const text = await extractPptxText(buffer);
         return { text: text.slice(0, MAX_INDEX_CHARS), source: 'binary-text', truncated: truncated || text.length > MAX_INDEX_CHARS };
       }
       if (IMAGE_MIMES.has(m) || IMAGE_EXTENSIONS.test(name || '')) {
