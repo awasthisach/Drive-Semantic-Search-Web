@@ -339,7 +339,7 @@ export const DuplicateFinder: React.FC<DuplicateFinderProps> = ({ files, folders
                   </div>
                 </div>
                 <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">
-                  {group.files.map((file, idx) => (
+                  {group.files.map(file => (
                     <li key={file.id} className="flex items-center gap-3 px-4 py-3">
                       <button type="button" onClick={() => toggleMoveChecked(file.id)} className="shrink-0" title="Select for move">
                         {selectedForMove.has(file.id) ? <Check className="w-4 h-4 text-blue-600" /> : <span className="w-4 h-4 inline-block rounded border border-zinc-300 dark:border-zinc-600" />}
