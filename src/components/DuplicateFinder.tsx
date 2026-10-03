@@ -56,7 +56,20 @@ export const DuplicateFinder: React.FC<DuplicateFinderProps> = ({ files, folders
     });
   }, [files]);
 
+  const exactDuplicateIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const group of duplicateGroups) {
+      if (group.verification !== 'sha256') continue;
+      const keepId = chooseKeepCandidate(group.files).file.id;
+      for (const file of group.files) {
+        if (file.id !== keepId) ids.add(file.id);
+      }
+    }
+    return ids;
+  }, [duplicateGroups]);
+
   const toggleMove = (id: string) => {
+    if (!exactDuplicateIds.has(id)) return;
     setSelectedForMove(previous => {
       const next = new Set(previous);
       if (next.has(id)) next.delete(id); else next.add(id);
@@ -133,23 +146,16 @@ export const DuplicateFinder: React.FC<DuplicateFinderProps> = ({ files, folders
     }
   };
 
-  const selectSemanticGroup = (group: SemanticDuplicateGroup) => {
-    setSelectedForMove(previous => {
-      const next = new Set(previous);
-      const keepId = chooseKeepCandidate(group.files).file.id;
-      group.files.filter(file => file.id !== keepId).forEach(file => next.add(file.id));
-      return next;
-    });
+  const selectSemanticGroup = (_group: SemanticDuplicateGroup) => {
+    setActionStatus('Semantic similarity is review-only. SHA-256 verification is required before a file can be selected for move.');
   };
 
   const selectAllMoveCandidates = () => {
-    const ids = duplicateGroups.flatMap(group => { const keepId = chooseKeepCandidate(group.files).file.id; return group.files.filter(file => file.id !== keepId).map(file => file.id); });
-    const semanticIds = semanticGroups.flatMap(group => { const keepId = chooseKeepCandidate(group.files).file.id; return group.files.filter(file => file.id !== keepId).map(file => file.id); });
-    const next = new Set([...ids, ...semanticIds]);
+    const next = new Set(exactDuplicateIds);
     setSelectedForMove(next);
     setActionStatus(next.size
-      ? `Selected ${next.size} candidate file(s) for move. Click “Move selected”.`
-      : 'No non-primary candidates to move.');
+      ? 'Selected ' + next.size + ' SHA-256 verified duplicate file(s) for move. Click “Move selected”.'
+      : 'No SHA-256 verified duplicate files are ready to move.');
   };
 
   const toggleMoveChecked = (id: string) => toggleMove(id);
