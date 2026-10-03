@@ -2,6 +2,41 @@ import { DriveFile, DuplicateGroup } from '../types';
 import type { VectorRecord } from './vectorIndex';
 import { cosineSimilarity, l2Normalize } from './embeddings/vector';
 
+
+export interface KeepCandidate {
+  file: DriveFile;
+  score: number;
+  reasons: string[];
+}
+
+function keepCandidateScore(file: DriveFile, peers: DriveFile[]): KeepCandidate {
+  const maxSize = Math.max(1, ...peers.map(f => f.size || 0));
+  const normalizedName = (file.name || '').toLowerCase();
+  let score = ((file.size || 0) / maxSize) * 12;
+  const reasons: string[] = [];
+  if (file.starred) { score += 40; reasons.push('starred'); }
+  if (file.isOffline) { score += 15; reasons.push('available offline'); }
+  if (file.folderId && file.folderId !== 'root') { score += 8; reasons.push('organized in a folder'); }
+  if (file.semanticSummary && file.semanticSummary.length >= 80) { score += 4; reasons.push('richer metadata'); }
+  if (/\\b(copy|duplicate|dup)\\b|\\(copy(?: \\d+)?\\)|\\(\\d+\\)$/i.test(normalizedName)) {
+    score -= 25;
+    reasons.push('copy/duplicate naming penalty');
+  }
+  const created = Date.parse(file.createdTime);
+  if (Number.isFinite(created)) score += Math.max(0, 8 - Math.min(8, (created - Math.min(...peers.map(f => Date.parse(f.createdTime) || created))) / 86_400_000 / 365));
+  if (!reasons.length) reasons.push('highest combined preservation score');
+  return { file, score, reasons };
+}
+
+export function chooseKeepCandidate(files: DriveFile[]): KeepCandidate {
+  if (!files.length) throw new Error('chooseKeepCandidate requires at least one file');
+  return files.map(file => keepCandidateScore(file, files)).sort((a,b) =>
+    b.score - a.score ||
+    Date.parse(a.file.createdTime) - Date.parse(b.file.createdTime) ||
+    Date.parse(a.file.modifiedTime) - Date.parse(b.file.modifiedTime) ||
+    a.file.name.localeCompare(b.file.name) || a.file.id.localeCompare(b.file.id)
+  )[0];
+}
 /**
  * Groups likely exact/candidate duplicates. SHA-256 is the only proof-grade
  * signal; matching size and normalized name remains a review-only candidate.
@@ -33,9 +68,10 @@ export function findDuplicates(files: DriveFile[]): DuplicateGroup[] {
       const singleSize = groupFiles[0].size;
       const totalSize = groupFiles.reduce((sum, file) => sum + file.size, 0);
       const reclaimableSize = totalSize - singleSize;
-      const sorted = [...groupFiles].sort(
+      const keep = chooseKeepCandidate(groupFiles).file;
+      const sorted = [keep, ...groupFiles.filter(file => file.id !== keep.id).sort(
         (a, b) => new Date(a.modifiedTime).getTime() - new Date(b.modifiedTime).getTime()
-      );
+      )];
       duplicateGroups.push({
         hash,
         verification: hash.startsWith('sha256:') ? 'sha256' : 'candidate',
