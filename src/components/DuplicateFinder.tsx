@@ -56,7 +56,20 @@ export const DuplicateFinder: React.FC<DuplicateFinderProps> = ({ files, folders
     });
   }, [files]);
 
+  const exactDuplicateIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const group of duplicateGroups) {
+      if (group.verification !== 'sha256') continue;
+      const keepId = chooseKeepCandidate(group.files).file.id;
+      for (const file of group.files) {
+        if (file.id !== keepId) ids.add(file.id);
+      }
+    }
+    return ids;
+  }, [duplicateGroups]);
+
   const toggleMove = (id: string) => {
+    if (!exactDuplicateIds.has(id)) return;
     setSelectedForMove(previous => {
       const next = new Set(previous);
       if (next.has(id)) next.delete(id); else next.add(id);
@@ -133,23 +146,16 @@ export const DuplicateFinder: React.FC<DuplicateFinderProps> = ({ files, folders
     }
   };
 
-  const selectSemanticGroup = (group: SemanticDuplicateGroup) => {
-    setSelectedForMove(previous => {
-      const next = new Set(previous);
-      const keepId = chooseKeepCandidate(group.files).file.id;
-      group.files.filter(file => file.id !== keepId).forEach(file => next.add(file.id));
-      return next;
-    });
+  const selectSemanticGroup = (_group: SemanticDuplicateGroup) => {
+    setActionStatus('Semantic similarity is review-only. SHA-256 verification is required before a file can be selected for move.');
   };
 
   const selectAllMoveCandidates = () => {
-    const ids = duplicateGroups.flatMap(group => { const keepId = chooseKeepCandidate(group.files).file.id; return group.files.filter(file => file.id !== keepId).map(file => file.id); });
-    const semanticIds = semanticGroups.flatMap(group => { const keepId = chooseKeepCandidate(group.files).file.id; return group.files.filter(file => file.id !== keepId).map(file => file.id); });
-    const next = new Set([...ids, ...semanticIds]);
+    const next = new Set(exactDuplicateIds);
     setSelectedForMove(next);
     setActionStatus(next.size
-      ? `Selected ${next.size} candidate file(s) for move. Click “Move selected”.`
-      : 'No non-primary candidates to move.');
+      ? 'Selected ' + next.size + ' SHA-256 verified duplicate file(s) for move. Click “Move selected”.'
+      : 'No SHA-256 verified duplicate files are ready to move.');
   };
 
   const toggleMoveChecked = (id: string) => toggleMove(id);
@@ -269,8 +275,8 @@ export const DuplicateFinder: React.FC<DuplicateFinderProps> = ({ files, folders
             {semanticStatus && <p className="text-[11px] text-zinc-600 dark:text-zinc-400" role="status">{semanticStatus}</p>}
             {semanticGroups.map((group, index) => (
               <div key={`${index}-${group.files.map(file => file.id).join('-')}`} className="rounded-xl border border-indigo-200/70 dark:border-indigo-900/60 bg-white/70 dark:bg-zinc-900/60 p-3">
-                <div className="flex items-center justify-between gap-2 mb-2"><span className="text-xs font-bold text-indigo-700 dark:text-indigo-300" title="Strongest direct aligned-chunk overlap score in this connected group. Some members may be linked indirectly; review before acting.">Best direct content-match score {Math.round(group.bestPairSimilarity * 100)}%</span><button type="button" onClick={() => selectSemanticGroup(group)} className="text-[11px] text-indigo-600 hover:underline">Select non-primary for move</button></div>
-                <div className="space-y-1">{group.files.map(file => <label key={file.id} className="flex items-center gap-2 text-xs"><input type="checkbox" checked={selectedForMove.has(file.id)} onChange={() => toggleMove(file.id)} /><span className="truncate">{file.name}</span></label>)}</div>
+                <div className="flex items-center justify-between gap-2 mb-2"><span className="text-xs font-bold text-indigo-700 dark:text-indigo-300" title="Strongest direct aligned-chunk overlap score in this connected group. Some members may be linked indirectly; review before acting.">Best direct content-match score {Math.round(group.bestPairSimilarity * 100)}%</span><button type="button" onClick={() => selectSemanticGroup(group)} className="text-[11px] text-indigo-600 hover:underline">Review only · SHA-256 required to move</button></div>
+                <div className="space-y-1">{group.files.map(file => <label key={file.id} className="flex items-center gap-2 text-xs opacity-70"><input type="checkbox" checked={false} disabled title="Semantic similarity is review-only; verify SHA-256 before moving" /><span className="truncate">{file.name}</span></label>)}</div>
               </div>
             ))}
             {uncertainPairs.length > 0 && (
@@ -332,7 +338,7 @@ export const DuplicateFinder: React.FC<DuplicateFinderProps> = ({ files, folders
                 <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">
                   {group.files.map(file => (
                     <li key={file.id} className="flex items-center gap-3 px-4 py-3">
-                      <button type="button" onClick={() => toggleMoveChecked(file.id)} className="shrink-0" title="Select for move">
+                      <button type="button" onClick={() => toggleMoveChecked(file.id)} disabled={!confirmed} className="shrink-0 disabled:opacity-40" title={confirmed ? "Select for move" : "Verify SHA-256 before selecting for move"}>
                         {selectedForMove.has(file.id) ? <Check className="w-4 h-4 text-blue-600" /> : <span className="w-4 h-4 inline-block rounded border border-zinc-300 dark:border-zinc-600" />}
                       </button>
                       <FileText className="w-4 h-4 text-zinc-400 shrink-0" />
