@@ -345,6 +345,31 @@ export async function getChunksForFile(fileId: string): Promise<IndexedChunk[]> 
   }
 }
 
+async function getChunkSnippets(keys: string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  if (!keys.length) return out;
+  try {
+    const db = await openDb();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(CHUNK_STORE, 'readonly');
+      const store = tx.objectStore(CHUNK_STORE);
+      for (const key of keys) {
+        const req = store.get(key);
+        req.onsuccess = () => {
+          const row = req.result as IndexedChunk | undefined;
+          if (row) out.set(key, (row.text || '').slice(0, 160).trim());
+        };
+      }
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error);
+    });
+  } catch {
+    // Search results remain valid even when snippet hydration fails.
+  }
+  return out;
+}
+
 async function getPostingsForTerm(term: string): Promise<Posting[]> {
   try {
     const db = await openDb();
@@ -409,13 +434,10 @@ export async function searchContentIndex(
   }
 
   const ranked = [...scores.entries()].sort((a, b) => b[1].score - a[1].score).slice(0, 200);
+  const snippetKeys = ranked.map(([fileId, acc]) => fileId + '#' + acc.bestChunkIdx);
+  const snippets = await getChunkSnippets(snippetKeys);
   for (const [fileId, acc] of ranked) {
-    let snippet = '';
-    try {
-      const chunks = await getChunksForFile(fileId);
-      const ch = chunks.find(c => c.idx === acc.bestChunkIdx) || chunks[0];
-      snippet = (ch?.text || '').slice(0, 160).trim();
-    } catch { /* ignore */ }
+    const snippet = snippets.get(fileId + '#' + acc.bestChunkIdx) || '';
     out.set(fileId, { score: acc.score, snippet });
   }
   return out;
