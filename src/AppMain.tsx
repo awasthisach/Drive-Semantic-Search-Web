@@ -289,7 +289,6 @@ export default function App() {
         {activeTab === 'storage_scanner' && (
           <React.Suspense fallback={<TabLoadingFallback />}>
             <DeviceStorageScanner
-              onImportToDrive={async (file) => { await handleUploadToDrive(file); }}
               onSelectPreviewFile={setPreviewFile}
             />
           </React.Suspense>
