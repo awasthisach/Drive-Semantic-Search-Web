@@ -17,7 +17,7 @@ A browser-first progressive web app for Google Drive browsing, hybrid search, bo
 - **Content indexing:** indexes Google-native exports, supported text files, DOCX, XLSX, PDFs, and images in the browser. Each file is capped at 500,000 indexed characters; the app records truncation.
 - **Bounded PDF profiles:** PDFs up to 10 pages include every page. Longer PDFs initially include only pages 1–5 and the last 5. Native selectable text is preferred; OCR is attempted only on sampled pages with sparse text.
 - **Folder-category suggestions:** ranks an indexed file against names of the existing folders in the current Drive corpus, including available parent-folder names. A suggestion only preselects a destination in the normal move dialog; the app never moves a file automatically.
-- **Duplicate review:** separates revision-verified SHA-256 matches, weaker size/name candidates, and semantic near-duplicate suggestions. Semantic suggestions never unlock trash.
+- **Duplicate review:** separates revision-verified SHA-256 matches, weaker size/name candidates, and semantic near-duplicate suggestions. Semantic suggestions never unlock or trigger Trash/Delete.
 - **Offline pinning:** saves downloaded/exported bytes to a bounded local cache (nominal limits: 200 MB total and 80 files; browser quota may be lower).
 - **Encrypted vault:** encrypts vault payloads using PBKDF2-derived keys and AES-GCM. The vault does not encrypt separate search indexes or the offline cache.
 - **Local backup:** exports indexed text, semantic vectors, Drive metadata snapshots, and encrypted vault records to a passphrase-protected file. Restore validates first and merges records; offline-pinned file bytes are excluded.
@@ -78,8 +78,8 @@ The feature uses the selected file’s local semantic profile and embeds only cu
 
 ### Duplicate signals
 
-- **SHA-256 confirmed:** matching SHA-256 for the exact Drive revision checked. Hash verification is the only proof-grade duplicate signal used to unlock trash; verification can be slow for many large files. A Drive edit invalidates the hash for the old revision.
-- **Size/name candidate:** same size and normalized name is a weak review candidate, not proof. Trash remains locked until SHA-256 verification succeeds.
+- **SHA-256 confirmed:** matching SHA-256 for the exact Drive revision checked. This is the strongest duplicate-evidence signal used by the review UI. It never unlocks, triggers, or performs Drive Trash/Delete; verification can be slow for many large files. A Drive edit invalidates the hash for the old revision.
+- **Size/name candidate:** same size and normalized name is a weak review candidate, not proof. SHA-256 verification strengthens review evidence; it does not enable any Trash/Delete operation.
 - **Semantic near-duplicate:** compares body-only embeddings across multiple chunks in order; file names and byte sizes are not comparison gates. One shared generic chunk is insufficient for a multi-chunk profile. Same-topic documents are not proof of duplicates.
 
 The semantic scan is bounded: it considers at most 500 file profiles, uses up to 12 representative chunks per file, and shortlists centroid-nearest pairs before ordered chunk-overlap scoring. The default content-match threshold is 90%; 85% and 95% are also available. Pairs within five points below the selected threshold are surfaced as **borderline**. If applicable, a user can request more sampled pages for those PDF pairs and then rerun the scan. If live profiles still contain the older title-bearing vector format, the scan asks for the one-time All-scope reindex rather than mixing profile formats.
@@ -209,6 +209,12 @@ After deployment, verify actual OAuth sign-in, Drive listing, content indexing, 
 - [PyMuPDF4LLM hybrid OCR overview](https://pymupdf.io/blog/hybrid-ocr-in-pymupdf4llm) — native-text-first processing and OCR only where extraction is incomplete. Its vendor performance figures are not treated as guarantees for this app.
 - [NVIDIA NeMo Curator semantic deduplication](https://docs.nvidia.com/nemo/curator/curate-text/process-data/deduplication/semdedup) — semantic similarity is a thresholded signal, not proof of identical documents.
 - [UMass CIIR, Partial Duplicate Detection for Large Book Collections](https://ciir-publications.cs.umass.edu/getpdf.php?id=970) — scanned-book duplicates, OCR noise, ordered content evidence, and the distinction between shared topic and duplicate work.
+
+## Release status
+
+The `main` branch is continuously validated by the production workflow. The release gate includes TypeScript checks, unit tests, production build, production asset-graph validation, bundle-size checks, a source-level Drive Trash/Delete guard, Worker dry-run, authenticated live Worker contract verification, GitHub Pages deployment, and live Pages JavaScript-module verification.
+
+The application is **release-ready for its implemented feature set** when the latest `main` workflow is green. A green workflow does not mean every Drive corpus, browser, OCR workload, or semantic-search query has been exhaustively validated.
 
 ## Current limitations
 
