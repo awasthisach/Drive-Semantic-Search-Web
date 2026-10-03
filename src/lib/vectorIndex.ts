@@ -15,6 +15,15 @@ const ANN_TABLES = 12;
 const ANN_BITS_PER_TABLE = 12;
 const ANN_DIMS_PER_PLANE = 8;
 const DEFAULT_EXACT_SEARCH_THRESHOLD = 128;
+/**
+ * ANN is an accelerator, not a relevance gate. Sparse buckets can return a
+ * plausible but incomplete neighborhood, especially for small/uneven corpora.
+ * When the ANN neighborhood is too small or its best similarity is weak, do a
+ * bounded exact scan so a false-positive ANN hit cannot suppress better
+ * semantic matches elsewhere in the corpus.
+ */
+const ANN_RECALL_GUARD_CANDIDATE_THRESHOLD = 64;
+const ANN_RECALL_GUARD_SCORE = 0.45;
 const ANN_META_ID_PREFIX = 'ann-index:';
 
 export interface VectorRecord {
@@ -608,8 +617,13 @@ export async function searchNeuralByEmbedding(
     topK: opts?.topK,
     liveFileIds: opts?.liveFileIds,
   });
-  const shouldFallback = usedAnn && (opts?.exactFallback ?? true) && annHits.length === 0;
-  if (shouldFallback) {
+  const bestAnnScore = annHits[0]?.score ?? -1;
+  const needsRecallGuard =
+    usedAnn &&
+    (opts?.exactFallback ?? true) &&
+    (vectors.length < ANN_RECALL_GUARD_CANDIDATE_THRESHOLD || bestAnnScore < ANN_RECALL_GUARD_SCORE);
+
+  if (needsRecallGuard) {
     const exactVectors = await listVectors(corpusKey);
     const exactHits = rankVectorsByQueryEmbedding(queryEmbedding, exactVectors, {
       minScore: opts?.minScore,
