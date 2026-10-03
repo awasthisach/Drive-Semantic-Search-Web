@@ -136,7 +136,10 @@ async function fullHashCandidates(entries: PickedEntry[], onProgress?: (done: nu
 function duplicateIds(entries: PickedEntry[]): Set<string> {
   const groups = new Map<string, PickedEntry[]>();
   for (const entry of entries) {
-    const key = entry.contentHash || 'fast:' + entry.fastFingerprint;
+    // Fast fingerprints are candidate-only evidence. They must never make a
+    // file movable: only a full SHA-256 match can classify an exact duplicate.
+    const key = entry.contentHash;
+    if (!key) continue;
     const list = groups.get(key) || [];
     list.push(entry);
     groups.set(key, list);
@@ -144,9 +147,9 @@ function duplicateIds(entries: PickedEntry[]): Set<string> {
   const ids = new Set<string>();
   for (const group of groups.values()) {
     if (group.length < 2) continue;
-    const verifiedGroup = group.every(entry => entry.verified && entry.contentHash);
-    if (verifiedGroup) group.forEach(entry => ids.add(entry.id));
-    else group.slice(1).forEach(entry => ids.add(entry.id));
+    if (group.every(entry => entry.verified && entry.contentHash)) {
+      group.forEach(entry => ids.add(entry.id));
+    }
   }
   return ids;
 }
@@ -287,7 +290,7 @@ export const DeviceStorageScanner: React.FC<Props> = ({ onSelectPreviewFile }) =
     <section className="rounded-2xl border border-amber-200 bg-amber-50 dark:bg-amber-950/20 p-4 space-y-3">
       <div className="flex items-start gap-3"><ShieldCheck className="w-5 h-5 text-amber-600 shrink-0"/><div>
         <h2 className="font-bold">Safe Storage Cleaner</h2>
-        <p className="text-xs text-zinc-600 dark:text-zinc-400">यह cleaner कोई local file delete नहीं करता। पहले folder access, फिर Move की अंतिम पुष्टि आवश्यक है। Full SHA-256 केवल fast-fingerprint से मिले candidate groups पर चलता है; पूरे storage को full-hash नहीं किया जाता।</p>
+        <p className="text-xs text-zinc-600 dark:text-zinc-400">यह cleaner कोई local file delete नहीं करता। पहले folder access, फिर Move की अंतिम पुष्टि आवश्यक है। Full SHA-256 केवल fast-fingerprint से मिले candidate groups पर चलता है; पूरे storage को full-hash नहीं किया जाता। Fast-fingerprint अकेले किसी file को duplicate घोषित या move नहीं करता।</p>
       </div></div>
       <div className="flex flex-wrap gap-2">
         <button type="button" onClick={() => selectRoot('phone_internal')} disabled={scanning || busy} className="px-3 py-2 rounded-xl bg-blue-600 text-white text-xs font-bold inline-flex gap-1.5 items-center"><FolderOpen className="w-4 h-4"/> Phone storage चुनें</button>
@@ -301,7 +304,7 @@ export const DeviceStorageScanner: React.FC<Props> = ({ onSelectPreviewFile }) =
       <button type="button" onClick={() => setSelected(new Set(visible.filter(f => f.isDuplicate).map(f => f.id)))} className="px-3 py-2 rounded-xl border text-xs font-semibold">Select duplicates</button>
     </div>
     <div className="flex flex-wrap items-center gap-2 text-xs">
-      <span className="font-semibold">{visible.length} files • {visible.filter(f => f.isDuplicate).length} duplicate candidates • {duplicateSelected.length} selected</span>
+      <span className="font-semibold">{visible.length} files • {visible.filter(f => f.isDuplicate).length} exact duplicates • {duplicateSelected.length} selected</span>
       {duplicateSelected.length > 0 && <>
         <input value={moveName} onChange={e => setMoveName(e.target.value)} className="w-40 px-2 py-1.5 rounded-lg border" aria-label="new folder name"/>
         <button type="button" disabled={busy} onClick={() => setConfirmMove(true)} className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white font-bold">Move selected to new folder</button>
@@ -315,7 +318,7 @@ export const DeviceStorageScanner: React.FC<Props> = ({ onSelectPreviewFile }) =
         <div className="min-w-0 flex-1">
           <div className="text-sm font-semibold truncate">{f.name}</div>
           <div className="text-[10px] text-zinc-500">{formatBytes(f.size)} • {f.source === 'sd_card' ? 'SD' : 'Phone'} • {f.path}</div>
-          {f.isDuplicate && <span className="text-[10px] text-amber-700 font-bold">{f.verified ? 'Exact duplicate · SHA-256 verified' : 'Duplicate candidate'}</span>}
+          {f.isDuplicate && <span className="text-[10px] text-amber-700 font-bold">Exact duplicate · SHA-256 verified</span>}
         </div>
         {onSelectPreviewFile && <button type="button" onClick={() => onSelectPreviewFile(asDriveFile(f))} className="px-2 py-1 rounded-lg border text-[10px]">Details</button>}
       </div>)}
@@ -324,7 +327,7 @@ export const DeviceStorageScanner: React.FC<Props> = ({ onSelectPreviewFile }) =
     {visible.length === 0 && <p className="text-center py-8 text-sm text-zinc-500">पहले Phone storage या SD card चुनें।</p>}
     {confirmMove && <div className="fixed inset-0 z-[70] bg-black/60 flex items-center justify-center p-4"><div className="w-full max-w-md rounded-2xl bg-white dark:bg-zinc-900 p-5 space-y-4 shadow-2xl">
       <h3 className="font-bold">Move की अंतिम अनुमति</h3>
-      <p className="text-sm">आप {duplicateSelected.length} verified duplicate candidate files को नए folder में move करने वाले हैं। पहले copy पूरी होगी; source केवल सफल copy के बाद हटेगा। कोई Delete/Trash action उपलब्ध नहीं है।</p>
+      <p className="text-sm">आप {duplicateSelected.length} exact SHA-256 verified duplicate files को नए folder में move करने वाले हैं। पहले copy पूरी होगी; source केवल सफल copy के बाद हटेगा। कोई Delete/Trash action उपलब्ध नहीं है।</p>
       <div className="flex justify-end gap-2"><button type="button" onClick={() => setConfirmMove(false)} className="px-3 py-2 rounded-lg border">Cancel</button><button type="button" onClick={() => void moveSelected()} className="px-3 py-2 rounded-lg bg-emerald-600 text-white font-bold">हाँ, Move करें</button></div>
     </div></div>}
   </div>;
