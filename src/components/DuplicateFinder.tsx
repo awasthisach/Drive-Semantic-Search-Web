@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { Copy, CheckCircle, Check, FileText, FolderInput, Sparkles, Loader2 } from 'lucide-react';
 import { DriveFile } from '../types';
-import { analyzeSemanticDuplicatesFromVectors, findDuplicates, SemanticDuplicateGroup, UncertainSemanticPair } from '../lib/duplicateEngine';
+import { analyzeSemanticDuplicatesFromVectors, chooseKeepCandidate, findDuplicates, SemanticDuplicateGroup, UncertainSemanticPair } from '../lib/duplicateEngine';
 import { countVectors, listVectors } from '../lib/vectorIndex';
 import { isLegacyTitleEmbeddingChunk } from '../lib/contentIndex';
 import { EMBED_CONFIG } from '../lib/embeddings/config';
@@ -136,14 +136,15 @@ export const DuplicateFinder: React.FC<DuplicateFinderProps> = ({ files, folders
   const selectSemanticGroup = (group: SemanticDuplicateGroup) => {
     setSelectedForMove(previous => {
       const next = new Set(previous);
-      group.files.slice(1).forEach(file => next.add(file.id));
+      const keepId = chooseKeepCandidate(group.files).file.id;
+      group.files.filter(file => file.id !== keepId).forEach(file => next.add(file.id));
       return next;
     });
   };
 
   const selectAllMoveCandidates = () => {
-    const ids = duplicateGroups.flatMap(group => group.files.slice(1).map(file => file.id));
-    const semanticIds = semanticGroups.flatMap(group => group.files.slice(1).map(file => file.id));
+    const ids = duplicateGroups.flatMap(group => { const keepId = chooseKeepCandidate(group.files).file.id; return group.files.filter(file => file.id !== keepId).map(file => file.id); });
+    const semanticIds = semanticGroups.flatMap(group => { const keepId = chooseKeepCandidate(group.files).file.id; return group.files.filter(file => file.id !== keepId).map(file => file.id); });
     const next = new Set([...ids, ...semanticIds]);
     setSelectedForMove(next);
     setActionStatus(next.size
@@ -350,8 +351,8 @@ export const DuplicateFinder: React.FC<DuplicateFinderProps> = ({ files, folders
                           {formatBytes(file.size)} · {new Date(file.modifiedTime).toLocaleDateString()}
                         </div>
                       </div>
-                      {idx === 0 && (
-                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300">
+                      {file.id === chooseKeepCandidate(group.files).file.id && (
+                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300" title={chooseKeepCandidate(group.files).reasons.join(', ')}>
                           Keep candidate
                         </span>
                       )}
