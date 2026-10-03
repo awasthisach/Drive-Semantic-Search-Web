@@ -4,7 +4,6 @@ import { getAccessToken, ensureValidToken } from '../lib/firebaseAuth';
 import {
   moveGoogleDriveFile,
   createGoogleDriveFolder,
-  deleteGoogleDriveFile,
   starGoogleDriveFile,
 } from '../lib/googleDriveService';
 import { saveVaultFile, removeVaultFile } from '../lib/vaultStore';
@@ -66,67 +65,6 @@ export function useDriveHandlersRest(s: DriveAppState) {
     });
   };
 
-  const handleDeleteFile = async (id: string) => {
-    const fileToDelete = files.find(f => f.id === id);
-    if (!fileToDelete) return;
-    if (fileToDelete.isGoogleDriveItem) {
-      try {
-        await withDriveAuthRetry(
-          async () => (await ensureValidToken()) || googleAccessToken || (await getAccessToken()),
-          t => setGoogleAccessToken(t),
-          tok => deleteGoogleDriveFile(tok, id)
-        );
-        setFiles(prev => prev.filter(f => f.id !== id));
-        removeIndexWithFeedback(id);
-        showDriveToast('Moved to Drive trash: "' + fileToDelete.name + '"');
-      } catch (err: any) {
-        console.error(err);
-        showDriveToast('Delete failed: ' + (err?.message || 'error') + ' — file kept');
-      }
-    } else {
-      setFiles(prev => prev.filter(f => f.id !== id));
-      removeIndexWithFeedback(id);
-    }
-  };
-
-  const handleRemoveMultipleFiles = async (ids: string[]) => {
-    const idSet = new Set(ids);
-    const filesToDelete = files.filter(f => idSet.has(f.id));
-    const localOnly = filesToDelete.filter(f => !f.isGoogleDriveItem);
-    const driveItems = filesToDelete.filter(f => f.isGoogleDriveItem);
-    if (localOnly.length) {
-      const localIds = new Set(localOnly.map(f => f.id));
-      setFiles(prev => prev.filter(f => !localIds.has(f.id)));
-      for (const lid of localIds) removeIndexWithFeedback(lid);
-    }
-    if (driveItems.length === 0) return;
-    const succeeded: string[] = [];
-    const failed: string[] = [];
-    await poolMap(driveItems, 4, async (f) => {
-      try {
-        await withDriveAuthRetry(
-          async () => (await ensureValidToken()) || googleAccessToken || (await getAccessToken()),
-          tok => setGoogleAccessToken(tok),
-          tok => deleteGoogleDriveFile(tok, f.id)
-        );
-        succeeded.push(f.id);
-      } catch (err) {
-        console.error(err);
-        failed.push(f.name);
-      }
-    });
-    if (succeeded.length) {
-      const ok = new Set(succeeded);
-      setFiles(prev => prev.filter(f => !ok.has(f.id)));
-      for (const sid of succeeded) removeIndexWithFeedback(sid);
-    }
-    if (failed.length) {
-      showDriveToast('Delete partial: ' + failed.length + ' failed');
-    } else if (succeeded.length) {
-      showDriveToast('Moved ' + succeeded.length + ' file(s) to Drive trash');
-    }
-  };
-
   const handleCreateFolder = async (newFolder: FolderItem) => {
     const token = (await ensureValidToken()) || googleAccessToken || (await getAccessToken());
     if (token && isGoogleConnected) {
@@ -152,6 +90,7 @@ export function useDriveHandlersRest(s: DriveAppState) {
     for (const f of localMoves) succeeded.push(f.id);
     await poolMap(driveMoves, 4, async (f) => {
       try {
+        if (f.canMove === false) throw new Error('Google Drive reports that this file cannot be moved by the current account');
         await withDriveAuthRetry(
           async () => (await ensureValidToken()) || googleAccessToken || (await getAccessToken()),
           tok => setGoogleAccessToken(tok),
@@ -370,7 +309,7 @@ export function useDriveHandlersRest(s: DriveAppState) {
   };
 
   return {
-    handleDeleteFile, handleRemoveMultipleFiles, handleCreateFolder,
+    handleCreateFolder,
     handleMoveFilesToFolder, handleToggleStar, handleToggleOffline,
     handleVerifyHashes, handleAddVaultFile, handleDeleteVaultFile,
   };

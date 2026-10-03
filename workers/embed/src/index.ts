@@ -1,3 +1,5 @@
+import { DurableObject } from "cloudflare:workers";
+
 /**
  * Authenticated /embed proxy — Phase 3 hardened.
  * Secrets: GEMINI_API_KEY, FIREBASE_PROJECT_ID (required)
@@ -14,6 +16,7 @@ export interface Env {
   MAX_BODY_BYTES?: string;
   ALLOWED_ORIGIN?: string;
   RATE_LIMIT_PER_MIN?: string;
+  RATE_LIMITER: DurableObjectNamespace<UserRateLimiter>;
 }
 
 const DEFAULT_MODEL = 'gemini-embedding-2';
@@ -25,8 +28,28 @@ const JWKS_URL =
 let jwksCache: { keys: (JsonWebKey & { kid?: string })[]; fetchedAt: number } | null = null;
 const JWKS_TTL_MS = 60 * 60 * 1000;
 
-/** Per-isolate rate buckets (best-effort on CF Workers). */
-const rateBuckets = new Map<string, { count: number; resetAt: number }>();
+
+
+export class UserRateLimiter extends DurableObject<Env> {
+  async fetch(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+    const limit = Math.max(1, Math.min(1000, Number(url.searchParams.get('limit') || 30)));
+    const now = Date.now();
+    const current = await this.ctx.storage.get<{ count: number; resetAt: number }>('bucket');
+    const bucket = !current || now >= current.resetAt
+      ? { count: 0, resetAt: now + 60_000 }
+      : current;
+    if (bucket.count >= limit) {
+      return Response.json({
+        allowed: false,
+        retryAfterSeconds: Math.max(1, Math.ceil((bucket.resetAt - now) / 1000)),
+      });
+    }
+    bucket.count += 1;
+    await this.ctx.storage.put('bucket', bucket);
+    return Response.json({ allowed: true, retryAfterSeconds: 0 });
+  }
+}
 
 function corsHeaders(origin: string): Record<string, string> {
   return {
@@ -60,16 +83,6 @@ function resolveOrigin(request: Request, allowed: string): string | null {
   return null;
 }
 
-function checkRateLimit(key: string, limit: number): boolean {
-  const now = Date.now();
-  let b = rateBuckets.get(key);
-  if (!b || now >= b.resetAt) {
-    b = { count: 0, resetAt: now + 60_000 };
-    rateBuckets.set(key, b);
-  }
-  b.count += 1;
-  return b.count <= limit;
-}
 
 async function getJwk(kid: string): Promise<JsonWebKey | null> {
   const now = Date.now();
@@ -233,8 +246,21 @@ export default {
     }
 
     const rateLimit = Number(env.RATE_LIMIT_PER_MIN || 30);
-    if (!checkRateLimit(verified.sub, rateLimit)) {
-      return json({ error: 'rate limited' }, 429, corsOrigin);
+    const limiter = env.RATE_LIMITER.get(env.RATE_LIMITER.idFromName(verified.sub));
+    const limitResponse = await limiter.fetch(
+      new Request('https://rate-limit/check?limit=' + encodeURIComponent(String(rateLimit)))
+    );
+    const limitResult = await limitResponse.json() as { allowed?: boolean; retryAfterSeconds?: number };
+    if (!limitResult.allowed) {
+      const retryAfter = Math.max(1, Number(limitResult.retryAfterSeconds || 1));
+      return new Response(JSON.stringify({ error: 'rate limited' }), {
+        status: 429,
+        headers: {
+          'Content-Type': 'application/json',
+          'Retry-After': String(retryAfter),
+          ...corsHeaders(corsOrigin),
+        },
+      });
     }
 
     let body: unknown;

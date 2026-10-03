@@ -75,7 +75,7 @@ export default function App() {
     showDriveToast,
     handleUploadFile, handleUploadToDrive, handleConnectDemoDrive,
     handleGoogleSignIn, handleGoogleSignOut, handleSyncGoogleDrive,
-    handleDeleteFile, handleRemoveMultipleFiles, handleCreateFolder,
+    handleCreateFolder,
     handleMoveFilesToFolder, handleToggleStar, handleToggleOffline,
     handleVerifyHashes, handleAddVaultFile, handleDeleteVaultFile,
     makeCorpusKey, ensureValidToken, getAccessToken,
@@ -216,8 +216,7 @@ export default function App() {
         {activeTab === 'dashboard' && (
           <Dashboard
             files={files} folders={folders} vaultFiles={vaultFiles}
-            onUploadFile={handleUploadFile} onUploadToDrive={handleUploadToDrive} onDeleteFile={handleDeleteFile}
-            onDeleteMultipleFiles={handleRemoveMultipleFiles} onMoveFilesToFolder={handleMoveFilesToFolder}
+            onUploadFile={handleUploadFile} onUploadToDrive={handleUploadToDrive} onMoveFilesToFolder={handleMoveFilesToFolder}
             onCreateFolder={handleCreateFolder} onToggleStar={handleToggleStar} onToggleOffline={handleToggleOffline}
             onSelectTab={tab => setActiveTab(tab)} onSelectPreviewFile={setPreviewFile}
             isGoogleConnected={isGoogleConnected} isGoogleLoading={isGoogleLoading}
@@ -273,7 +272,6 @@ export default function App() {
               files={files}
               folders={folders}
               corpusKey={makeCorpusKey(driveCorpus, sharedDriveId || undefined)}
-              onRemoveFiles={handleRemoveMultipleFiles}
               onMoveFiles={handleMoveFilesToFolder}
               onCreateFolder={handleCreateFolder}
               onVerifyHashes={handleVerifyHashes}
@@ -291,7 +289,6 @@ export default function App() {
         {activeTab === 'storage_scanner' && (
           <React.Suspense fallback={<TabLoadingFallback />}>
             <DeviceStorageScanner
-              onImportToDrive={(file) => { handleUploadFile(file); showDriveToast('Imported to local list: ' + file.name); }}
               onSelectPreviewFile={setPreviewFile}
             />
           </React.Suspense>

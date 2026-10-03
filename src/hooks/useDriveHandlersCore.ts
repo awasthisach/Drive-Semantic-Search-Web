@@ -4,7 +4,6 @@ import { googleSignIn, googleSignOut, getAccessToken, ensureValidToken } from '.
 import {
   moveGoogleDriveFile,
   createGoogleDriveFolder,
-  deleteGoogleDriveFile,
   uploadGoogleDriveFile,
   starGoogleDriveFile,
   listSharedDrives,

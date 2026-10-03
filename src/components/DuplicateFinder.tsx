@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
-import { Copy, Trash2, CheckCircle, Check, FileText, FolderInput, Sparkles, Loader2 } from 'lucide-react';
+import { Copy, CheckCircle, Check, FileText, FolderInput, Sparkles, Loader2 } from 'lucide-react';
 import { DriveFile } from '../types';
-import { analyzeSemanticDuplicatesFromVectors, findDuplicates, SemanticDuplicateGroup, UncertainSemanticPair } from '../lib/duplicateEngine';
+import { analyzeSemanticDuplicatesFromVectors, chooseKeepCandidate, findDuplicates, SemanticDuplicateGroup, UncertainSemanticPair } from '../lib/duplicateEngine';
 import { countVectors, listVectors } from '../lib/vectorIndex';
 import { isLegacyTitleEmbeddingChunk } from '../lib/contentIndex';
 import { EMBED_CONFIG } from '../lib/embeddings/config';
@@ -12,7 +12,6 @@ interface DuplicateFinderProps {
   files: DriveFile[];
   folders: import('../types').FolderItem[];
   corpusKey: string;
-  onRemoveFiles: (ids: string[]) => void;
   onMoveFiles: (ids: string[], folderId: string | undefined) => void;
   onCreateFolder: (folder: import('../types').FolderItem) => void;
   onVerifyHashes?: (fileIds: string[]) => Promise<void>;
@@ -27,8 +26,7 @@ const SEMANTIC_THRESHOLDS = [
   { value: 0.95, label: '95%', name: 'Strict', help: 'Only very similar content.' },
 ] as const;
 
-export const DuplicateFinder: React.FC<DuplicateFinderProps> = ({ files, folders, corpusKey, onRemoveFiles, onMoveFiles, onCreateFolder, onVerifyHashes, verifyBusy, onDeepCheck, deepCheckBusy }) => {
-  const [selectedDuplicates, setSelectedDuplicates] = useState<Set<string>>(() => new Set());
+export const DuplicateFinder: React.FC<DuplicateFinderProps> = ({ files, folders, corpusKey, onMoveFiles, onCreateFolder, onVerifyHashes, verifyBusy, onDeepCheck, deepCheckBusy }) => {
   const [selectedForMove, setSelectedForMove] = useState<Set<string>>(() => new Set());
   const [showMoveModal, setShowMoveModal] = useState(false);
   const [semanticGroups, setSemanticGroups] = useState<SemanticDuplicateGroup[]>([]);
@@ -53,10 +51,6 @@ export const DuplicateFinder: React.FC<DuplicateFinderProps> = ({ files, folders
   React.useEffect(() => {
     const liveIds = new Set(files.map(file => file.id));
     setSelectedForMove(previous => {
-      const next = new Set([...previous].filter(id => liveIds.has(id)));
-      return next.size === previous.size ? previous : next;
-    });
-    setSelectedDuplicates(previous => {
       const next = new Set([...previous].filter(id => liveIds.has(id)));
       return next.size === previous.size ? previous : next;
     });
@@ -142,63 +136,30 @@ export const DuplicateFinder: React.FC<DuplicateFinderProps> = ({ files, folders
   const selectSemanticGroup = (group: SemanticDuplicateGroup) => {
     setSelectedForMove(previous => {
       const next = new Set(previous);
-      group.files.slice(1).forEach(file => next.add(file.id));
+      const keepId = chooseKeepCandidate(group.files).file.id;
+      group.files.filter(file => file.id !== keepId).forEach(file => next.add(file.id));
       return next;
     });
   };
 
   const selectAllMoveCandidates = () => {
-    const ids = duplicateGroups.flatMap(group => group.files.slice(1).map(file => file.id));
-    const semanticIds = semanticGroups.flatMap(group => group.files.slice(1).map(file => file.id));
+    const ids = duplicateGroups.flatMap(group => { const keepId = chooseKeepCandidate(group.files).file.id; return group.files.filter(file => file.id !== keepId).map(file => file.id); });
+    const semanticIds = semanticGroups.flatMap(group => { const keepId = chooseKeepCandidate(group.files).file.id; return group.files.filter(file => file.id !== keepId).map(file => file.id); });
     const next = new Set([...ids, ...semanticIds]);
     setSelectedForMove(next);
     setActionStatus(next.size
-      ? `Selected ${next.size} non-primary file(s) for move. Click “Move selected”.`
+      ? `Selected ${next.size} candidate file(s) for move. Click “Move selected”.`
       : 'No non-primary candidates to move.');
   };
 
   const toggleMoveChecked = (id: string) => toggleMove(id);
 
-  const confirmedIds = new Set(
-    duplicateGroups
-      .filter(g => g.hash.startsWith('sha256:'))
-      .flatMap(g => g.files.map(f => f.id))
-  );
-
-  const toggleSelect = (id: string) => {
-    if (!confirmedIds.has(id)) return;
-    const next = new Set(selectedDuplicates);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
-    setSelectedDuplicates(next);
-  };
-
-  const handleSelectAllDuplicates = () => {
-    const next = new Set<string>();
-    duplicateGroups.forEach(group => {
-      if (!group.hash.startsWith('sha256:')) return;
-      group.files.slice(1).forEach(f => next.add(f.id));
-    });
-    setSelectedDuplicates(next);
-    if (next.size === 0) {
-      setActionStatus('Trash stays locked until SHA-256 verify. Use “Verify candidates (SHA-256)” first (needs real Google Drive sign-in, not Demo).');
-    } else {
-      setActionStatus(`Selected ${next.size} verified non-primary file(s) for trash.`);
-    }
-  };
-
   const handleDeselectAll = () => {
-    setSelectedDuplicates(new Set());
     setSelectedForMove(new Set());
     setActionStatus('Selection cleared.');
   };
 
-  const handleCleanSelected = () => {
-    const safe = Array.from(selectedDuplicates).filter(id => confirmedIds.has(id));
-    if (safe.length === 0) return;
-    onRemoveFiles(safe);
-    setSelectedDuplicates(new Set());
-  };
+
 
   return (
     <div className="space-y-6">
@@ -216,7 +177,7 @@ export const DuplicateFinder: React.FC<DuplicateFinderProps> = ({ files, folders
                 </span>
               </div>
               <p className="text-xs sm:text-sm text-zinc-400 mt-1 max-w-xl">
-                Trash locked until SHA-256 verify. Use Verify candidates to hash Drive files (download/export).
+                Files are never deleted or sent to Drive Trash. SHA-256 is used only to prove exact duplicates before review/move.
               </p>
             </div>
           </div>
@@ -252,9 +213,6 @@ export const DuplicateFinder: React.FC<DuplicateFinderProps> = ({ files, folders
               <button type="button" onClick={selectAllMoveCandidates} className="text-blue-600 hover:underline font-medium">
                 Select non-primary for move
               </button>
-              <button type="button" onClick={handleSelectAllDuplicates} className="text-indigo-600 hover:underline font-medium">
-                Select non-primary for trash
-              </button>
               <button type="button" onClick={handleDeselectAll} className="text-zinc-500 hover:underline">
                 Clear selection
               </button>
@@ -270,7 +228,7 @@ export const DuplicateFinder: React.FC<DuplicateFinderProps> = ({ files, folders
                       setActionStatus('All candidate groups are already SHA-256 verified (or none pending).');
                       return;
                     }
-                    setActionStatus('Verifying SHA-256… Demo Drive cannot download real bytes — sign in with Google for hash verify. Trash stays locked until hashes succeed.');
+                    setActionStatus('Verifying SHA-256… Demo Drive cannot download real bytes — sign in with Google for hash verify. No delete or trash action exists.');
                     onVerifyHashes(ids);
                   }}
                   className="text-emerald-600 hover:underline font-medium disabled:opacity-50"
@@ -282,9 +240,6 @@ export const DuplicateFinder: React.FC<DuplicateFinderProps> = ({ files, folders
             <div className="flex items-center gap-2">
               <button type="button" disabled={selectedForMove.size === 0} onClick={() => setShowMoveModal(true)} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-blue-600 text-white text-xs font-bold disabled:opacity-40">
                 <FolderInput className="w-3.5 h-3.5" /> Move selected ({selectedForMove.size})
-              </button>
-              <button type="button" disabled={selectedDuplicates.size === 0} onClick={handleCleanSelected} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-red-600 text-white text-xs font-bold disabled:opacity-40" title="Trash only after SHA-256 verify">
-                <Trash2 className="w-3.5 h-3.5" /> Trash verified ({selectedDuplicates.size})
               </button>
             </div>
           </div>
@@ -298,7 +253,7 @@ export const DuplicateFinder: React.FC<DuplicateFinderProps> = ({ files, folders
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
                 <div className="flex items-center gap-2 text-sm font-bold"><Sparkles className="w-4 h-4 text-indigo-500" /> Semantic near-duplicate review</div>
-                <p className="text-[11px] text-zinc-500 mt-1">Compares multiple content chunks in order, not names or file sizes. Same-topic files are not proof of duplicates; results are review-only and trash stays locked to SHA-256.</p>
+                <p className="text-[11px] text-zinc-500 mt-1">Compares multiple content chunks in order, not names or file sizes. Same-topic files are not proof of duplicates; results are review-only; no delete or trash action exists.</p>
               </div>
               <div className="flex items-center gap-2">
                 <span className="text-[11px] text-zinc-500">Content match</span>
@@ -355,7 +310,7 @@ export const DuplicateFinder: React.FC<DuplicateFinderProps> = ({ files, folders
               >
                 <div className="px-4 py-2.5 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between gap-2 text-xs">
                   <span className={`font-bold ${confirmed ? 'text-emerald-600' : 'text-amber-600'}`}>
-                    {confirmed ? 'confirmed SHA-256' : 'candidate (size + name) — trash locked'}
+                    {confirmed ? 'confirmed SHA-256' : 'candidate (size + name) — move-only safety'}
                   </span>
                   <div className="flex items-center gap-2">
                     {!confirmed && onVerifyHashes && (
@@ -364,7 +319,7 @@ export const DuplicateFinder: React.FC<DuplicateFinderProps> = ({ files, folders
                         disabled={verifyBusy}
                         className="text-[10px] font-bold text-emerald-600 hover:underline disabled:opacity-50"
                         onClick={() => {
-                          setActionStatus('Verifying group SHA-256… Real Google Drive sign-in required. Trash stays locked until success.');
+                          setActionStatus('Verifying group SHA-256… Real Google Drive sign-in required. No delete or trash action exists.');
                           onVerifyHashes(group.files.map(f => f.id));
                         }}
                       >
@@ -375,18 +330,11 @@ export const DuplicateFinder: React.FC<DuplicateFinderProps> = ({ files, folders
                   </div>
                 </div>
                 <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">
-                  {group.files.map((file, idx) => (
+                  {group.files.map(file => (
                     <li key={file.id} className="flex items-center gap-3 px-4 py-3">
                       <button type="button" onClick={() => toggleMoveChecked(file.id)} className="shrink-0" title="Select for move">
                         {selectedForMove.has(file.id) ? <Check className="w-4 h-4 text-blue-600" /> : <span className="w-4 h-4 inline-block rounded border border-zinc-300 dark:border-zinc-600" />}
                       </button>
-                      {confirmed ? (
-                        <button type="button" onClick={() => toggleSelect(file.id)} className="shrink-0" title="Select for trash">
-                          {selectedDuplicates.has(file.id) ? <Trash2 className="w-3.5 h-3.5 text-red-600" /> : <span className="w-3.5 h-3.5 inline-block rounded border border-dashed border-red-300 dark:border-red-700" />}
-                        </button>
-                      ) : (
-                        <span className="w-3.5 h-3.5 inline-block rounded border border-dashed border-zinc-300 dark:border-zinc-600 opacity-40 shrink-0" title="Verify SHA-256 before trash" />
-                      )}
                       <FileText className="w-4 h-4 text-zinc-400 shrink-0" />
                       <div className="min-w-0 flex-1">
                         <div className="text-sm font-semibold truncate">{file.name}</div>
@@ -394,9 +342,9 @@ export const DuplicateFinder: React.FC<DuplicateFinderProps> = ({ files, folders
                           {formatBytes(file.size)} · {new Date(file.modifiedTime).toLocaleDateString()}
                         </div>
                       </div>
-                      {idx === 0 && (
-                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300">
-                          Primary (review)
+                      {file.id === chooseKeepCandidate(group.files).file.id && (
+                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300" title={chooseKeepCandidate(group.files).reasons.join(', ')}>
+                          Keep candidate
                         </span>
                       )}
                     </li>
