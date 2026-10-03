@@ -272,7 +272,6 @@ export default function App() {
               files={files}
               folders={folders}
               corpusKey={makeCorpusKey(driveCorpus, sharedDriveId || undefined)}
-              onRemoveFiles={handleRemoveMultipleFiles}
               onMoveFiles={handleMoveFilesToFolder}
               onCreateFolder={handleCreateFolder}
               onVerifyHashes={handleVerifyHashes}
