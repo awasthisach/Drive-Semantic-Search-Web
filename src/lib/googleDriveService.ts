@@ -126,6 +126,7 @@ function mapRawItem(
       tags: ['google-drive', category, primaryParent ? 'categorized' : 'root'],
       semanticSummary: item.description || `Google Drive file "${item.name}" of type ${item.mimeType}`,
       starred: Boolean(item.starred),
+      canMove: Boolean(item.capabilities?.canMoveItemWithinDrive || item.capabilities?.canMoveItemOutOfDrive || item.capabilities?.canAddMyDriveParent || item.capabilities?.canRemoveMyDriveParent),
     },
     colorIdx,
   };
@@ -157,7 +158,7 @@ export async function fetchGoogleDriveData(
   if (corpus === 'drive' && !driveId) {
     throw new Error('fetchGoogleDriveData: driveId required when corpus is drive');
   }
-  const fields = 'files(id,name,mimeType,size,modifiedTime,createdTime,thumbnailLink,webViewLink,iconLink,parents,trashed,description,starred),nextPageToken';
+  const fields = 'files(id,name,mimeType,size,modifiedTime,createdTime,thumbnailLink,webViewLink,iconLink,parents,trashed,description,starred,capabilities/canMoveItemWithinDrive,capabilities/canMoveItemOutOfDrive,capabilities/canAddMyDriveParent,capabilities/canRemoveMyDriveParent),nextPageToken';
   const query = buildDriveQuery(fileType);
   const folders: FolderItem[] = [];
   const files: DriveFile[] = [];
@@ -300,28 +301,6 @@ export async function createGoogleDriveFolder(
     throw new Error(errorData?.error?.message || `Failed to create folder: ${response.status}`);
   }
   return response.json();
-}
-
-export async function deleteGoogleDriveFile(
-  accessToken: string,
-  fileId: string
-): Promise<void> {
-  const response = await fetchWithBackoff(
-    `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?supportsAllDrives=true`,
-    {
-      method: 'PATCH',
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ trashed: true }),
-    },
-    { label: 'files.trash', maxRetries: 4, baseMs: 400 }
-  );
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData?.error?.message || `Failed to trash file: ${response.status}`);
-  }
 }
 
 export async function starGoogleDriveFile(
