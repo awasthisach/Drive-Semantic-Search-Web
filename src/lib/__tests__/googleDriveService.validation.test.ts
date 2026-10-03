@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { fetchGoogleDriveData, listSharedDrives } from '../googleDriveService';
+import { buildDriveQuery, fetchGoogleDriveData, listSharedDrives } from '../googleDriveService';
 
 describe('fetchGoogleDriveData validation', () => {
   beforeEach(() => {
@@ -24,5 +24,13 @@ describe('fetchGoogleDriveData validation', () => {
 describe('listSharedDrives validation', () => {
   it('rejects empty accessToken', async () => {
     await expect(listSharedDrives('')).rejects.toThrow(/accessToken/);
+  });
+});
+
+describe('Drive listing safety filters', () => {
+  it('never includes trashed files or Drive shortcuts', () => {
+    const query = buildDriveQuery('all');
+    expect(query).toContain('trashed=false');
+    expect(query).toContain("mimeType!='application/vnd.google-apps.shortcut'");
   });
 });
