@@ -11,3 +11,11 @@ MAX_CHARS = "8000"
 MAX_BODY_BYTES = "300000"
 RATE_LIMIT_PER_MIN = "30"
 ALLOWED_ORIGIN = "https://awasthisach.github.io"
+
+[[durable_objects.bindings]]
+name = "RATE_LIMITER"
+class_name = "UserRateLimiter"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["UserRateLimiter"]
