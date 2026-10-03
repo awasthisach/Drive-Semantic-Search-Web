@@ -257,6 +257,12 @@ export const DeviceStorageScanner: React.FC<Props> = ({ onSelectPreviewFile }) =
         for (const f of list) {
           if (!f.fileHandle || !f.parentHandle) continue;
           const file = await f.fileHandle.getFile();
+          // Re-verify immediately before source removal. A file can change after the scan;
+          // never remove a source whose current bytes no longer match the verified duplicate.
+          const currentHash = 'sha256:' + await sha256Bytes(await file.arrayBuffer());
+          if (!f.verified || f.contentHash !== currentHash) {
+            throw new Error('File changed after verification: ' + f.name + '. Move stopped safely; rescan before retrying.');
+          }
           const ext = f.name.includes('.') ? f.name.slice(f.name.lastIndexOf('.')) : '';
           const stem = ext ? f.name.slice(0, -ext.length) : f.name;
           let targetName = f.name;
