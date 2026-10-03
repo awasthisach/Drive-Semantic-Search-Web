@@ -43,6 +43,8 @@ export interface DriveFile {
   tags: string[];
   semanticSummary: string;
   starred?: boolean;
+  /** Whether Drive reports that the current user can move this item. */
+  canMove?: boolean;
 }
 
 export interface VaultFile {
