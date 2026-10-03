@@ -351,7 +351,19 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
     }
 
     try {
-      for (let i = startAt; i < extractable.length; i++) {
+      const completed = new Set<number>();
+      let contiguousCursor = startAt;
+      const markCompleted = (i: number) => {
+        completed.add(i);
+        while (completed.has(contiguousCursor)) {
+          completed.delete(contiguousCursor);
+          contiguousCursor++;
+        }
+        writeCursor(sig, contiguousCursor);
+        setResumeFrom(contiguousCursor);
+      };
+
+      const processFile = async (i: number): Promise<void> => {
         if (cancelIndexRef.current) {
           setIndexProgress(
             `Cancelled after ${i}/${extractable.length}. Indexed: ${ok}, skipped fresh: ${skippedFresh}, failed: ${fail}.` +
@@ -360,7 +372,7 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
                 : '')
           );
           logDiag('info', 'index', `cancelled mid-run at ${i}/${extractable.length}`);
-          break;
+          return;
         }
 
         const f = extractable[i];
@@ -402,8 +414,8 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
               }
             }
             skippedFresh++;
-            writeCursor(sig, i + 1);
-            continue;
+            markCompleted(i);
+            return;
           }
 
           setIndexProgress(`Extracting ${i + 1}/${extractable.length} (${pct}%): ${f.name}`);
@@ -422,16 +434,15 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
           );
 
           if (cancelIndexRef.current || indexController.signal.aborted) {
-            writeCursor(sig, i);
             setIndexProgress(`Cancelled at ${i}/${extractable.length}. Resume available.`);
             logDiag('info', 'index', `cancelled at ${i}`);
-            break;
+            return;
           }
 
           if (!text || !text.trim()) {
             skippedFresh++;
-            writeCursor(sig, i + 1);
-            continue;
+            markCompleted(i);
+            return;
           }
 
           await putIndexedDocument({
@@ -469,7 +480,7 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
           }
 
           ok++;
-          writeCursor(sig, i + 1);
+          markCompleted(i);
         } catch (err: any) {
           if (
             err instanceof ExtractAbortedError ||
@@ -477,20 +488,34 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
             indexController.signal.aborted ||
             cancelIndexRef.current
           ) {
-            writeCursor(sig, i);
             setIndexProgress(`Cancelled / timed out at ${i}/${extractable.length}. Resume available.`);
             logDiag('warn', 'index', `abort/timeout at ${i}`);
-            break;
+            return;
           }
           fail++;
           if (failedNames.length < 5) failedNames.push(f.name);
           console.warn('[SemanticSearch] index failed for', f.name, err);
           logDiag('warn', 'index.file', `fail ${f.name}: ${err?.message || err}`);
-          writeCursor(sig, i + 1);
+          markCompleted(i);
         }
-      }
+ 
+      };
 
-      if (!cancelIndexRef.current && !indexController.signal.aborted) {
+      // Bounded worker pool: a slow PDF/OCR/embedding request no longer serializes
+      // every remaining file. Checkpoints advance only across contiguous completions,
+      // so a later worker can finish without making resume skip unfinished work.
+      let nextIndex = startAt;
+      const workerCount = Math.min(3, Math.max(0, n - startAt));
+      const worker = async () => {
+        while (!cancelIndexRef.current && !indexController.signal.aborted) {
+          const i = nextIndex++;
+          if (i >= extractable.length) return;
+          await processFile(i);
+        }
+      };
+      await Promise.all(Array.from({ length: workerCount }, () => worker()));
+
+      if (!cancelIndexRef.current && !indexController.signal.aborted && contiguousCursor >= n) {
         clearCursor();
         setResumeFrom(0);
         const doneMsg =
