@@ -90,6 +90,7 @@ export function useDriveHandlersRest(s: DriveAppState) {
     for (const f of localMoves) succeeded.push(f.id);
     await poolMap(driveMoves, 4, async (f) => {
       try {
+        if (f.canMove === false) throw new Error('Google Drive reports that this file cannot be moved by the current account');
         await withDriveAuthRetry(
           async () => (await ensureValidToken()) || googleAccessToken || (await getAccessToken()),
           tok => setGoogleAccessToken(tok),
