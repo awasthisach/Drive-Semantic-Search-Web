@@ -11,7 +11,7 @@ A browser-first progressive web app for Google Drive browsing, hybrid search, bo
 
 ## Features
 
-- **Drive browsing and management:** My Drive, All drives, or a selected Shared Drive; file filters; upload, move, star, and trash actions.
+- **Drive browsing and management:** My Drive, All drives, or a selected Shared Drive; file filters; upload, move, and star actions. **There is no Drive Trash/Delete action in this app.**
 - **Incremental synchronization:** full-list initialization followed by the Google Drive Changes API when the file-type filter is **All**. Incomplete/capped change drains do not advance the checkpoint.
 - **Hybrid search:** metadata, BM25 over locally indexed text, and optional neural similarity. Metadata/BM25 remain available when semantic embeddings are disabled or unavailable.
 - **Content indexing:** indexes Google-native exports, supported text files, DOCX, XLSX, PDFs, and images in the browser. Each file is capped at 500,000 indexed characters; the app records truncation.
@@ -218,7 +218,7 @@ After deployment, verify actual OAuth sign-in, Drive listing, content indexing, 
 - Neural ranking weights and ANN recall are not validated on a representative production Drive corpus.
 - Export-based hashes for native Google files identify the downloaded export bytes; different export representations can affect matching.
 - Browser-local IndexedDB can be cleared, evicted, or run out of quota; local data is not backed up by this repository.
-- The broad Drive OAuth scope, token storage, plaintext local search/offline stores, and XSS threat model are described in [SECURITY.md](SECURITY.md).
+- The Drive OAuth scope is broad because moving arbitrary existing Drive files cannot be performed with the narrower `drive.file` scope. The application code intentionally exposes no Drive Trash/Delete operation; CI contains a source-level no-trash/delete guard. Token storage, plaintext local search/offline stores, and the XSS threat model are described in [SECURITY.md](SECURITY.md).
 - The Worker’s in-memory rate limiter is isolate-local and not a global quota system.
 
 ## Repository layout

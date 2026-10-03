@@ -33,6 +33,9 @@ jobs:
       - name: Typecheck
         run: npm run lint
 
+      - name: No-Drive-Trash/Delete guard
+        run: node scripts/verify-no-drive-delete.mjs
+
       - name: Placeholder guard
         run: |
           if grep -rn "PLACEHOLDER" src/ --include='*.ts' --include='*.tsx'; then
