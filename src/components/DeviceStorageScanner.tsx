@@ -188,18 +188,36 @@ export const DeviceStorageScanner: React.FC<Props> = ({ onSelectPreviewFile }) =
       setRoots(p => ({ ...p, [which]: root }));
       setScanning(true);
       setHashProgress(null);
-      const scanned: PickedEntry[] = [];
+      const candidateBuckets = new Map<string, PickedEntry[]>();
+      let scannedCount = 0;
       const total = await scanDirectoryBatched(root, which, batch => {
-        scanned.push(...batch);
-        setFiles(prev => [...prev.filter(f => f.source !== which), ...scanned]);
+        scannedCount += batch.length;
+        for (const entry of batch) {
+          const list = candidateBuckets.get(entry.fastFingerprint) || [];
+          list.push(entry);
+          candidateBuckets.set(entry.fastFingerprint, list);
+        }
+        setFiles(prev => [...prev.filter(f => f.source !== which), ...batch]);
       });
       setHashProgress({ done: 0, total: 0 });
-      const verified = await fullHashCandidates(scanned, (done, candidateTotal) => setHashProgress({ done, total: candidateTotal }));
-      setFiles(prev => [...prev.filter(f => f.source !== which), ...verified]);
+      const candidates = [...candidateBuckets.values()].filter(group => group.length > 1).flat();
+      await fullHashCandidates(candidates, (done, candidateTotal) => {
+        setHashProgress({ done, total: candidateTotal });
+        if (done % 4 === 0 || done === candidateTotal) {
+          setFiles(prev => prev.map(entry => {
+            const updated = candidates.find(candidate => candidate.id === entry.id);
+            return updated || entry;
+          }));
+        }
+      });
+      setFiles(prev => prev.map(entry => {
+        const updated = candidates.find(candidate => candidate.id === entry.id);
+        return updated || entry;
+      }));
       setSelected(new Set());
       setScanning(false);
       setHashProgress(null);
-      show((which === 'phone_internal' ? 'Phone storage' : 'SD card') + ': ' + total + ' files scanned in batches. Candidate groups were full SHA-256 verified. Nothing was deleted.');
+      show((which === 'phone_internal' ? 'Phone storage' : 'SD card') + ': ' + scannedCount + ' files scanned in batches. Candidate groups were full SHA-256 verified. Nothing was deleted.');
     } catch (e) {
       setScanning(false);
       setHashProgress(null);
