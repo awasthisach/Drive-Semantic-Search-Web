@@ -489,7 +489,6 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
             indexController.signal.aborted ||
             cancelIndexRef.current
           ) {
-            writeCursor(sig, i);
             setIndexProgress(`Cancelled / timed out at ${i}/${extractable.length}. Resume available.`);
             logDiag('warn', 'index', `abort/timeout at ${i}`);
             return;
@@ -517,7 +516,7 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
       };
       await Promise.all(Array.from({ length: workerCount }, () => worker()));
 
-      if (!cancelIndexRef.current && !indexController.signal.aborted) {
+      if (!cancelIndexRef.current && !indexController.signal.aborted && contiguousCursor >= n) {
         clearCursor();
         setResumeFrom(0);
         const doneMsg =
