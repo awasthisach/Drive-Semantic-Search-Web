@@ -20,6 +20,7 @@ const forbidden = [
 ];
 const hits = [];
 for (const file of files) {
+  if (file.endsWith('verify-no-drive-delete.mjs')) continue;
   const text = await readFile(file, 'utf8');
   for (const rule of forbidden) if (rule.re.test(text)) hits.push(file + ': ' + rule.label);
 }
