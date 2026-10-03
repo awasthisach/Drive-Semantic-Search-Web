@@ -415,7 +415,7 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
             }
             skippedFresh++;
             markCompleted(i);
-            continue;
+            return;
           }
 
           setIndexProgress(`Extracting ${i + 1}/${extractable.length} (${pct}%): ${f.name}`);
@@ -434,7 +434,6 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
           );
 
           if (cancelIndexRef.current || indexController.signal.aborted) {
-            writeCursor(sig, i);
             setIndexProgress(`Cancelled at ${i}/${extractable.length}. Resume available.`);
             logDiag('info', 'index', `cancelled at ${i}`);
             return;
@@ -443,7 +442,7 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
           if (!text || !text.trim()) {
             skippedFresh++;
             markCompleted(i);
-            continue;
+            return;
           }
 
           await putIndexedDocument({
