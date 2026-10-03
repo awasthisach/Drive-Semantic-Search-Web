@@ -62,7 +62,7 @@ export async function listSharedDrives(accessToken: string): Promise<SharedDrive
   return drives;
 }
 
-function buildDriveQuery(fileType: DriveFileTypeFilter = 'all'): string {
+export function buildDriveQuery(fileType: DriveFileTypeFilter = 'all'): string {
   const base = "trashed=false and mimeType!='application/vnd.google-apps.shortcut'";
   switch (fileType) {
     case 'documents':
