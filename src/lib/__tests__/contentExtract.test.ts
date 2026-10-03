@@ -143,6 +143,7 @@ describe('binary document and OCR support', () => {
     expect(canExtractText('application/pdf', 'report.pdf')).toBe(true);
     expect(canExtractText('application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'report.docx')).toBe(true);
     expect(canExtractText('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'report.xlsx')).toBe(true);
+    expect(canExtractText('application/vnd.openxmlformats-officedocument.presentationml.presentation', 'deck.pptx')).toBe(true);
     expect(canExtractText('image/png', 'scan.png')).toBe(true);
     expect(canExtractText('image/jpeg', 'scan.jpg')).toBe(true);
   });
@@ -151,6 +152,7 @@ describe('binary document and OCR support', () => {
     expect(canExtractText('application/octet-stream', 'report.pdf')).toBe(true);
     expect(canExtractText('application/octet-stream', 'report.docx')).toBe(true);
     expect(canExtractText('application/octet-stream', 'report.xlsx')).toBe(true);
+    expect(canExtractText('application/octet-stream', 'deck.pptx')).toBe(true);
     expect(canExtractText('application/octet-stream', 'scan.png')).toBe(true);
     expect(canExtractText('application/octet-stream', 'scan.jpeg')).toBe(true);
   });
