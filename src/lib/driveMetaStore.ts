@@ -110,6 +110,41 @@ export async function loadDriveMetaSnapshot(
   }
 }
 
+/** Strict backup export of all corpus snapshots; sync page tokens are not included. */
+export async function exportDriveMetaSnapshotsForBackup(): Promise<DriveMetaSnapshot[]> {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const req = db.transaction(STORE, 'readonly').objectStore(STORE).getAll();
+    req.onsuccess = () => resolve(((req.result || []) as DriveMetaSnapshot[]).filter(row => row.key !== 'latest'));
+    req.onerror = () => reject(req.error || new Error('Could not read Drive metadata for backup'));
+  });
+}
+
+/** Merge Drive snapshots and drop local change tokens so the next sync safely refreshes them. */
+export async function restoreDriveMetaSnapshotsFromBackup(
+  snapshots: DriveMetaSnapshot[]
+): Promise<number> {
+  if (!snapshots.length) return 0;
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction([STORE, TOKEN_STORE], 'readwrite');
+    const store = tx.objectStore(STORE);
+    const tokens = tx.objectStore(TOKEN_STORE);
+    let latest = snapshots[0];
+    for (const snapshot of snapshots) {
+      const key = snapshotKey(snapshot.corpus, snapshot.sharedDriveId);
+      const restored = { ...snapshot, key };
+      store.put(restored);
+      tokens.delete(tokenKey(snapshot.corpus, snapshot.sharedDriveId));
+      if ((snapshot.savedAt || '') > (latest.savedAt || '')) latest = snapshot;
+    }
+    store.put({ ...latest, key: 'latest' });
+    tx.oncomplete = () => resolve(snapshots.length);
+    tx.onerror = () => reject(tx.error || new Error('Could not restore Drive metadata'));
+    tx.onabort = () => reject(tx.error || new Error('Drive metadata restore was aborted'));
+  });
+}
+
 export async function saveChangesPageToken(
   corpus: string,
   sharedDriveId: string | undefined,

@@ -306,6 +306,16 @@ export async function listIndexedDocuments(corpusKey?: string): Promise<IndexedD
   }
 }
 
+/** Strict read for backup export: unlike the UI helper, this propagates storage errors. */
+export async function exportIndexedDocumentsForBackup(): Promise<IndexedDocument[]> {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const req = db.transaction(DOC_STORE, 'readonly').objectStore(DOC_STORE).getAll();
+    req.onsuccess = () => resolve((req.result || []) as IndexedDocument[]);
+    req.onerror = () => reject(req.error || new Error('Could not read indexed documents for backup'));
+  });
+}
+
 export async function countIndexedDocuments(corpusKey?: string): Promise<number> {
   if (corpusKey) {
     return (await listIndexedDocuments(corpusKey)).length;

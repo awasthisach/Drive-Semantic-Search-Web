@@ -20,6 +20,7 @@ A browser-first progressive web app for Google Drive browsing, hybrid search, bo
 - **Duplicate review:** separates revision-verified SHA-256 matches, weaker size/name candidates, and semantic near-duplicate suggestions. Semantic suggestions never unlock trash.
 - **Offline pinning:** saves downloaded/exported bytes to a bounded local cache (nominal limits: 200 MB total and 80 files; browser quota may be lower).
 - **Encrypted vault:** encrypts vault payloads using PBKDF2-derived keys and AES-GCM. The vault does not encrypt separate search indexes or the offline cache.
+- **Local backup:** exports indexed text, semantic vectors, Drive metadata snapshots, and encrypted vault records to a passphrase-protected file. Restore validates first and merges records; offline-pinned file bytes are excluded.
 - **Device storage scanner:** reviews a user-selected phone/SD-card directory where the browser supports the File System Access API. It does not silently delete files.
 - **PWA shell and diagnostics:** installable app shell with cached application assets, plus a bounded diagnostics buffer with token/email redaction on export.
 
@@ -95,6 +96,14 @@ Semantic groups are connected review groups: a member may be linked indirectly r
 - SHA-256 hashes are retained only with the `modifiedTime` of the revision whose bytes were verified. A stale offline-cache hash is not restored as verified for a different current Drive revision.
 - These are application-level crash/replay safeguards, not a substitute for backing up browser-local data. Clearing browser site data deletes local indexes and the offline cache.
 
+## Local backup and restore
+
+Open the **Backup** tab to create or restore a `.dssbackup` file. Backup creation compresses the data and encrypts it in the browser with PBKDF2-SHA-256 (310,000 iterations) and AES-GCM-256. Choose a separate passphrase of at least 12 characters; it is never saved or sent to a server. Keep the passphrase separately from the file—there is no recovery if it is forgotten.
+
+The archive includes extracted/indexed text and extraction metadata, semantic vectors, saved Drive metadata snapshots, and the vault's already-encrypted records. Vault entries still require their original vault passphrase after restore. Offline-pinned file bytes are excluded because they are a bounded, re-downloadable cache; re-pin files after restoring. OAuth/session tokens, Drive Changes API page tokens, embedding consent, diagnostics, and transient UI state are never exported. After restore, sign in and sync Drive to refresh metadata and obtain fresh change tokens.
+
+Restore first decrypts and validates the entire archive for preview, then requires an explicit merge confirmation. Matching document and Drive snapshot records are replaced; each restored document's vector profile is replaced by the archived vectors (or cleared if the archive has none). Matching vault items are overwritten, while unrelated records are retained. The merge spans separate IndexedDB stores and is not atomic, so a browser storage/quota failure can leave an earlier part of the merge applied. The in-browser limits are 128 MiB uncompressed and 160 MiB per backup file. Keep a copy of the original file until restored data has been checked.
+
 ## Privacy and security
 
 This is a browser application, not a hosted Drive data-processing backend. “Client-side” does **not** mean all data is encrypted or never leaves the browser.
@@ -108,6 +117,7 @@ This is a browser application, not a hosted Drive data-processing backend. “Cl
 | PDF/image OCR assets | PDF.js/Tesseract.js scripts, WASM and `eng+hin` language data load from public CDNs as needed. | PDF/image bytes are downloaded to and processed in the browser; OCR itself is local. The browser may contact those CDNs for code/language files. |
 | Offline-pinned files | Offline-cache IndexedDB database | Stores file bytes and metadata locally without vault encryption; browser storage may be evicted or quota-limited. |
 | Vault entries | Vault-specific IndexedDB store | Payload encrypted with AES-GCM using a PBKDF2-derived key. This does not protect against malicious same-origin JavaScript/XSS. |
+| Backup file | User-downloaded `.dssbackup` archive | Contains extracted text, vectors, metadata and vault ciphertext; protected by a separate passphrase-derived AES-GCM key. No backup is uploaded by the app. |
 | Firebase web config and OAuth client ID | Public frontend config | Expected to be visible in the browser. Restrict the Firebase API key and OAuth client origins in Google Cloud/Firebase settings. |
 | Gemini API key and Cloudflare credentials | Worker / GitHub Actions secrets | Never put these values in `VITE_*`, frontend config, a browser bundle, or committed files. |
 

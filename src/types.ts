@@ -84,7 +84,7 @@ export interface SyncStats {
   networkOnline: boolean;
 }
 
-export type AppTab = 'dashboard' | 'storage_scanner' | 'vault' | 'duplicates' | 'search' | 'offline';
+export type AppTab = 'dashboard' | 'storage_scanner' | 'vault' | 'duplicates' | 'search' | 'offline' | 'backup';
 
 export type StorageSource = 'phone_internal' | 'sd_card';
 

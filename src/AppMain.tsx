@@ -33,6 +33,9 @@ const DuplicateFinder = React.lazy(() =>
 const OfflineFilesList = React.lazy(() =>
   import('./components/OfflineFilesList').then(m => ({ default: m.OfflineFilesList }))
 );
+const LocalBackupManager = React.lazy(() =>
+  import('./components/LocalBackupManager').then(m => ({ default: m.LocalBackupManager }))
+);
 const FilePreviewModal = React.lazy(() =>
   import('./components/FilePreviewModal').then(m => ({ default: m.FilePreviewModal }))
 );
@@ -201,7 +204,7 @@ export default function App() {
       </header>
 
       <nav className="flex gap-1 px-3 py-2 overflow-x-auto border-b border-zinc-200 dark:border-zinc-800 text-xs font-semibold">
-        {(['dashboard', 'search', 'duplicates', 'vault', 'storage_scanner', 'offline'] as const).map(id => (
+        {(['dashboard', 'search', 'duplicates', 'vault', 'storage_scanner', 'offline', 'backup'] as const).map(id => (
           <button key={id} type="button" onClick={() => setActiveTab(id)}
             className={`px-3 py-1.5 rounded-lg whitespace-nowrap ${activeTab === id ? 'bg-blue-600 text-white' : 'bg-zinc-100 dark:bg-zinc-800'}`}>
             {id === 'storage_scanner' ? 'Storage' : id.charAt(0).toUpperCase() + id.slice(1)}
@@ -296,6 +299,11 @@ export default function App() {
         {activeTab === 'offline' && (
           <React.Suspense fallback={<TabLoadingFallback />}>
             <OfflineFilesList files={files} onToggleOffline={handleToggleOffline} onSelectFile={setPreviewFile} />
+          </React.Suspense>
+        )}
+        {activeTab === 'backup' && (
+          <React.Suspense fallback={<TabLoadingFallback />}>
+            <LocalBackupManager />
           </React.Suspense>
         )}
       </main>
