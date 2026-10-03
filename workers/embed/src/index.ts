@@ -1,3 +1,5 @@
+import { DurableObject } from "cloudflare:workers";
+
 /**
  * Authenticated /embed proxy — Phase 3 hardened.
  * Secrets: GEMINI_API_KEY, FIREBASE_PROJECT_ID (required)
