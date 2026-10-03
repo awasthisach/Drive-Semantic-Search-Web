@@ -190,7 +190,7 @@ export const DeviceStorageScanner: React.FC<Props> = ({ onSelectPreviewFile }) =
       setHashProgress(null);
       const candidateBuckets = new Map<string, PickedEntry[]>();
       let scannedCount = 0;
-      const total = await scanDirectoryBatched(root, which, batch => {
+      await scanDirectoryBatched(root, which, batch => {
         scannedCount += batch.length;
         for (const entry of batch) {
           const list = candidateBuckets.get(entry.fastFingerprint) || [];
