@@ -97,6 +97,7 @@ function mapRawItem(
         color: FOLDER_COLORS[colorIdx % FOLDER_COLORS.length],
         description: item.description || `Google Drive folder with ${item.name}`,
         createdAt: item.createdTime,
+        parentIds: item.parents || [],
       },
       colorIdx: colorIdx + 1,
     };

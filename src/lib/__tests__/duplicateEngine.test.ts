@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { findDuplicates, findSemanticDuplicatesFromVectors } from '../duplicateEngine';
+import { analyzeSemanticDuplicatesFromVectors, findDuplicates, findSemanticDuplicatesFromVectors } from '../duplicateEngine';
 import type { DriveFile } from '../../types';
 import type { VectorRecord } from '../vectorIndex';
 
@@ -19,6 +19,22 @@ function makeFile(partial: Partial<DriveFile> & { id: string; name: string }): D
     isGoogleDriveItem: true,
     ...partial,
   } as DriveFile;
+}
+
+function vector(fileId: string, idx: number, embedding: number[], text = `chunk ${idx}`): VectorRecord {
+  return {
+    id: fileId + '#' + idx,
+    fileId,
+    idx,
+    text,
+    embedding,
+    corpusKey: 'user',
+    contentHash: 'gdrive-' + fileId,
+    embeddingModel: 'gemini-embedding-2',
+    embeddingVersion: '3',
+    dimension: embedding.length,
+    indexedAt: '2024-01-01T00:00:00.000Z',
+  };
 }
 
 describe('findDuplicates', () => {
@@ -70,24 +86,61 @@ describe('findDuplicates', () => {
     ];
     expect(findDuplicates(files)).toEqual([]);
   });
+});
 
+describe('semantic duplicate review', () => {
   it('groups indexed semantic near-duplicates for review without exact hashes', () => {
     const files = [
       makeFile({ id: '1', name: 'Hindi notes.txt', contentHash: 'gdrive-1' }),
       makeFile({ id: '2', name: 'English notes.txt', contentHash: 'gdrive-2' }),
       makeFile({ id: '3', name: 'Budget.xlsx', contentHash: 'gdrive-3' }),
     ];
-    const vector = (fileId: string, embedding: number[]): VectorRecord => ({
-      id: fileId + '#0', fileId, idx: 0, text: fileId, embedding,
-      corpusKey: 'user', contentHash: 'gdrive-' + fileId,
-      embeddingModel: 'gemini-embedding-2', embeddingVersion: '3', dimension: embedding.length,
-      indexedAt: '2024-01-01T00:00:00.000Z',
-    });
     const groups = findSemanticDuplicatesFromVectors(files, [
-      vector('1', [1, 0]), vector('2', [0.99, 0.01]), vector('3', [0, 1]),
+      vector('1', 0, [1, 0]), vector('2', 0, [0.99, 0.01]), vector('3', 0, [0, 1]),
     ], 0.9);
     expect(groups).toHaveLength(1);
     expect(groups[0].files.map(file => file.id)).toEqual(['1', '2']);
     expect(groups[0].bestPairSimilarity).toBeGreaterThan(0.9);
+  });
+
+  it('finds the same content under different names and byte sizes without using metadata as a gate', () => {
+    const files = [
+      makeFile({ id: 'a', name: 'History - scan.pdf', size: 1_200_000 }),
+      makeFile({ id: 'b', name: 'old_archive_002.pdf', size: 2_400_000 }),
+    ];
+    const rows = [
+      vector('a', 0, [1, 0]), vector('a', 1, [0, 1]), vector('a', 2, [0.7, 0.7]),
+      vector('b', 0, [0.999, 0.01]), vector('b', 1, [0.01, 0.999]), vector('b', 2, [0.71, 0.70]),
+    ];
+    const groups = findSemanticDuplicatesFromVectors(files, rows, 0.9);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].files.map(file => file.id).sort()).toEqual(['a', 'b']);
+  });
+
+  it('does not call two same-topic documents duplicates from one shared chunk alone', () => {
+    const files = [
+      makeFile({ id: 'a', name: 'Physics textbook.pdf' }),
+      makeFile({ id: 'b', name: 'Optics textbook.pdf' }),
+    ];
+    const rows = [
+      vector('a', 0, [1, 0]), vector('a', 1, [0, 1]), vector('a', 2, [0, -1]),
+      vector('b', 0, [0.999, 0.01]), vector('b', 1, [-1, 0]), vector('b', 2, [-0.7, -0.7]),
+    ];
+    const analysis = analyzeSemanticDuplicatesFromVectors(files, rows, 0.9);
+    expect(analysis.groups).toHaveLength(0);
+  });
+
+  it('returns near-threshold pairs separately so a user can request more sampled pages', () => {
+    const files = [
+      makeFile({ id: 'a', name: 'scan-a.pdf' }),
+      makeFile({ id: 'b', name: 'scan-b.pdf' }),
+    ];
+    const analysis = analyzeSemanticDuplicatesFromVectors(files, [
+      vector('a', 0, [1, 0]), vector('b', 0, [0.92, Math.sqrt(1 - 0.92 ** 2)]),
+    ], 0.95);
+    expect(analysis.groups).toHaveLength(0);
+    expect(analysis.uncertainPairs).toHaveLength(1);
+    expect(analysis.uncertainPairs[0].similarity).toBeGreaterThanOrEqual(0.9);
+    expect(analysis.uncertainPairs[0].similarity).toBeLessThan(0.95);
   });
 });

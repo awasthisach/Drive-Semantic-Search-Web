@@ -2,6 +2,7 @@
  * Durable content index + inverted postings (browser FTS-style).
  */
 import { removeVectorsForFile } from './vectorIndex';
+import type { PdfOcrCoverage } from './ocrExtract';
 const DB_NAME = 'drive-content-index';
 const DB_VERSION = 3;
 const DOC_STORE = 'documents';
@@ -23,6 +24,8 @@ export interface IndexedDocument {
   source: 'export' | 'binary-text' | 'offline-blob';
   driveModifiedTime?: string;
   textTruncated?: boolean;
+  extractionPolicyVersion?: string;
+  pdfCoverage?: PdfOcrCoverage;
   /** My Drive / Shared Drive scope — pruning is scoped to this key */
   corpusKey?: string;
 }
@@ -88,10 +91,14 @@ export function chunkText(text: string): string[] {
   return chunks;
 }
 
-/** Representation shared by BM25 and neural indexing; title is a semantic signal. */
-export function buildEmbeddingChunks(name: string, text: string): string[] {
-  const title = (name || 'Untitled file').trim();
-  return chunkText(text).map(chunk => `title: ${title} | text: ${chunk}`);
+/** Neural document vectors contain body text only; names remain searchable through metadata/BM25. */
+export function buildEmbeddingChunks(_name: string, text: string): string[] {
+  return chunkText(text);
+}
+
+/** True for vectors created by the earlier `title: … | text: …` chunk format. */
+export function isLegacyTitleEmbeddingChunk(text: string): boolean {
+  return /^title: .* \| text: /.test(text);
 }
 
 export function tokenize(text: string): string[] {
@@ -103,9 +110,11 @@ export function tokenize(text: string): string[] {
 
 export function isDocumentStale(
   existing: IndexedDocument | null | undefined,
-  driveModifiedTime?: string
+  driveModifiedTime?: string,
+  requiredExtractionPolicyVersion?: string
 ): boolean {
   if (!existing) return true;
+  if (requiredExtractionPolicyVersion && existing.extractionPolicyVersion !== requiredExtractionPolicyVersion) return true;
   if (!driveModifiedTime) return false;
   if (!existing.driveModifiedTime) return true;
   return existing.driveModifiedTime !== driveModifiedTime;
@@ -131,7 +140,11 @@ export async function putIndexedDocument(doc: {
   source: IndexedDocument['source'];
   driveModifiedTime?: string;
   textTruncated?: boolean;
+  extractionPolicyVersion?: string;
+  pdfCoverage?: PdfOcrCoverage;
   corpusKey?: string;
+  /** Keep vectors that were successfully staged before an expanded re-index. */
+  preserveVectors?: boolean;
 }): Promise<void> {
   const chunks = chunkText(doc.text);
   const indexed: IndexedDocument = {
@@ -145,12 +158,14 @@ export async function putIndexedDocument(doc: {
     source: doc.source,
     driveModifiedTime: doc.driveModifiedTime,
     textTruncated: doc.textTruncated,
+    extractionPolicyVersion: doc.extractionPolicyVersion,
+    pdfCoverage: doc.pdfCoverage,
     corpusKey: doc.corpusKey,
   };
   const db = await openDb();
   // Vector storage is a separate database. Remove the old derived vectors first;
   // if that fails, keep the old text index rather than pairing new text with stale vectors.
-  await removeVectorsForFile(doc.id);
+  if (!doc.preserveVectors) await removeVectorsForFile(doc.id);
   await new Promise<void>((resolve, reject) => {
     const tx = db.transaction([DOC_STORE, CHUNK_STORE, POSTING_STORE], 'readwrite');
     const termBest = new Map<string, { tf: number; chunkIdx: number }>();

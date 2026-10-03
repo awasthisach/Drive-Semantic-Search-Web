@@ -20,6 +20,8 @@ import { createEmbeddingProvider } from '../lib/embeddings/client';
 import { getFirebaseIdToken } from '../lib/firebaseAuth';
 import { paginateResults } from '../lib/pagination';
 import { logDiag } from '../lib/diagnostics';
+import { PDF_EXTRACTION_POLICY_VERSION } from '../lib/ocrExtract';
+import { FolderCategorySuggestions } from './FolderCategorySuggestions';
 
 interface SemanticSearchProps {
   files: DriveFile[];
@@ -31,6 +33,7 @@ interface SemanticSearchProps {
   onToggleOffline: (id: string) => void;
   accessToken: string | null;
   onRequestToken?: () => Promise<string | null>;
+  onReviewFolderSuggestion?: (file: DriveFile, folderId: string) => void;
   corpusKey: string;
 }
 
@@ -98,6 +101,7 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
   onToggleOffline,
   accessToken,
   onRequestToken,
+  onReviewFolderSuggestion,
   corpusKey,
 }) => {
   const [query, setQuery] = useState('');
@@ -334,6 +338,7 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
     let embeddingFail = 0;
     let skippedFresh = 0;
     let truncated = 0;
+    let sampledPdf = 0;
     const failedNames: string[] = [];
     const n = extractable.length;
     const embeddingProvider = isEmbedConfigured()
@@ -363,7 +368,13 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
         setIndexProgress(`Checking ${i + 1}/${extractable.length} (${pct}%): ${f.name}`);
         try {
           const existing = await getIndexedDocument(f.id);
-          if (!isDocumentStale(existing, f.modifiedTime)) {
+          const isPdf = f.mimeType === 'application/pdf' || /\.pdf$/i.test(f.name || '');
+          const stale = isDocumentStale(
+            existing,
+            f.modifiedTime,
+            isPdf ? PDF_EXTRACTION_POLICY_VERSION : undefined
+          );
+          if (!stale) {
             if (embeddingProvider && existing?.text) {
               const chunks = buildEmbeddingChunks(existing.name || f.name, existing.text);
               const compatible = await hasCompatibleVectorSet({
@@ -396,7 +407,13 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
           }
 
           setIndexProgress(`Extracting ${i + 1}/${extractable.length} (${pct}%): ${f.name}`);
-          const { text, source, truncated: textWasTruncated } = await extractDriveFileTextWithTimeout(
+          const {
+            text,
+            source,
+            truncated: textWasTruncated,
+            pdfCoverage,
+            extractionPolicyVersion,
+          } = await extractDriveFileTextWithTimeout(
             token,
             f.id,
             f.mimeType || '',
@@ -425,10 +442,13 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
             source,
             driveModifiedTime: f.modifiedTime,
             textTruncated: textWasTruncated,
+            extractionPolicyVersion,
+            pdfCoverage,
             corpusKey,
           });
 
           if (textWasTruncated) truncated++;
+          if (pdfCoverage && pdfCoverage.deferredPageCount > 0) sampledPdf++;
 
           if (embeddingProvider) {
             try {
@@ -477,6 +497,7 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
           `Done (${scopeLabel}). Indexed ${ok}, skipped fresh ${skippedFresh}, failed ${fail}` +
             (embeddingFail ? `, embed fail ${embeddingFail}` : '') +
             (truncated ? `, truncated ${truncated}` : '') +
+            (sampledPdf ? `, long PDFs sampled (${sampledPdf}; other pages deferred)` : '') +
             (failedNames.length ? `. Failed: ${failedNames.join(', ')}` : '');
         setIndexProgress(doneMsg);
         logDiag('info', 'index', doneMsg);
@@ -548,6 +569,9 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
         </select>
       </div>
 
+      <p className="text-[11px] text-zinc-500">
+        PDFs: all pages up to 10; otherwise first 5 + last 5. Native text is preferred; OCR is only used on sampled pages with sparse text. Borderline pairs can request up to 5 middle pages. Neural vectors are content-only; filenames stay in metadata search. After upgrading, run All → Index / Rebuild once to migrate old vectors.
+      </p>
       <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-500">
         <Database className="w-3.5 h-3.5" />
         <span>{indexedCount} indexed</span>
@@ -602,6 +626,14 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
           </span>
         )}
       </div>
+
+      <FolderCategorySuggestions
+        files={files}
+        folders={folders}
+        corpusKey={corpusKey}
+        refreshKey={indexedCount}
+        onReviewMove={(file, folderId) => onReviewFolderSuggestion?.(file, folderId)}
+      />
 
       {results.length > 0 && (
         <div className="flex flex-wrap items-center gap-2 text-xs">

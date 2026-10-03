@@ -3,6 +3,7 @@ import * as contentIndex from '../contentIndex';
 import {
   buildEmbeddingChunks, chunkText, tokenize, searchContentIndex,
   putIndexedDocument, getIndexedDocument, countIndexedDocuments, removeIndexedDocumentsByIds,
+  isLegacyTitleEmbeddingChunk,
 } from '../contentIndex';
 
 describe('chunkText', () => {
@@ -35,10 +36,13 @@ describe('tokenize', () => {
 });
 
 describe('buildEmbeddingChunks', () => {
-  it('includes the filename in every embedding chunk', () => {
-    const chunks = buildEmbeddingChunks('Hemp Research.pdf', 'A short body');
-    expect(chunks).toHaveLength(1);
-    expect(chunks[0]).toBe('title: Hemp Research.pdf | text: A short body');
+  it('keeps filenames out so renamed copies have the same semantic content profile', () => {
+    const originalName = buildEmbeddingChunks('Hemp Research.pdf', 'A short body');
+    const renamedCopy = buildEmbeddingChunks('Different archive title.pdf', 'A short body');
+    expect(originalName).toEqual(['A short body']);
+    expect(renamedCopy).toEqual(originalName);
+    expect(isLegacyTitleEmbeddingChunk('title: Hemp Research.pdf | text: A short body')).toBe(true);
+    expect(isLegacyTitleEmbeddingChunk('A short body')).toBe(false);
   });
 });
 
@@ -72,5 +76,34 @@ describe('durable content index mutations', () => {
     expect(await removeIndexedDocumentsByIds(['replace-test'])).toBe(1);
     expect(await getIndexedDocument('replace-test')).toBeNull();
     expect((await searchContentIndex('newtoken', 'test')).has('replace-test')).toBe(false);
+  });
+
+  it('persists sampled-PDF coverage and marks old extraction policies stale', async () => {
+    const pdfCoverage = {
+      totalPages: 80,
+      policy: 'first-last-5' as const,
+      sampledPages: [1, 2, 3, 4, 5, 76, 77, 78, 79, 80],
+      attemptedOcrPages: [1, 2, 3, 4, 5, 76, 77, 78, 79, 80],
+      successfulOcrPages: [1, 2, 3, 4, 5, 76, 77, 78, 79, 80],
+      deferredPageCount: 70,
+      nativeTextPageCount: 0,
+    };
+    const policy = 'pdf-page-sampled-v1';
+    await putIndexedDocument({
+      id: 'sampled-pdf',
+      name: 'book.pdf',
+      mimeType: 'application/pdf',
+      text: 'sampled OCR content',
+      source: 'binary-text',
+      driveModifiedTime: '2024-01-01T00:00:00.000Z',
+      extractionPolicyVersion: policy,
+      pdfCoverage,
+      corpusKey: 'test',
+    });
+
+    const stored = await getIndexedDocument('sampled-pdf');
+    expect(stored?.pdfCoverage).toEqual(pdfCoverage);
+    expect(contentIndex.isDocumentStale(stored, '2024-01-01T00:00:00.000Z', policy)).toBe(false);
+    expect(contentIndex.isDocumentStale(stored, '2024-01-01T00:00:00.000Z', 'new-policy')).toBe(true);
   });
 });

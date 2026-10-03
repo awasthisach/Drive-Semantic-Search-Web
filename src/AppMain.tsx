@@ -15,6 +15,11 @@ import {
 import { isEmbedConfigured } from './lib/embeddings/config';
 import { EmbeddingConsentModal } from './components/EmbeddingConsentModal';
 import type { DriveFile } from './types';
+import { extractDriveFileTextWithTimeout } from './lib/contentExtract';
+import { buildEmbeddingChunks, MAX_INDEX_CHARS, putIndexedDocument } from './lib/contentIndex';
+import { createEmbeddingProvider } from './lib/embeddings/client';
+import { getFirebaseIdToken } from './lib/firebaseAuth';
+import { embedAndStoreChunks } from './lib/vectorIndex';
 
 const DeviceStorageScanner = React.lazy(() =>
   import('./components/DeviceStorageScanner').then(m => ({ default: m.DeviceStorageScanner }))
@@ -74,8 +79,10 @@ export default function App() {
   } = useDriveApp();
 
   const [searchMoveTargets, setSearchMoveTargets] = React.useState<DriveFile[]>([]);
+  const [searchMoveSuggestedFolderId, setSearchMoveSuggestedFolderId] = React.useState<string | undefined>();
   const [consentModalOpen, setConsentModalOpen] = React.useState(false);
   const [embedConsentOn, setEmbedConsentOn] = React.useState(() => isEmbeddingConsentGranted());
+  const [deepCheckBusy, setDeepCheckBusy] = React.useState(false);
 
   React.useEffect(() => {
     if (searchMoveTargetFile) {
@@ -85,8 +92,75 @@ export default function App() {
 
   const closeMoveModal = () => {
     setSearchMoveTargets([]);
+    setSearchMoveSuggestedFolderId(undefined);
     setSearchMoveTargetFile(null);
   };
+
+  const handleReviewFolderSuggestion = (file: DriveFile, folderId: string) => {
+    setSearchMoveSuggestedFolderId(folderId);
+    setSearchMoveTargets([file]);
+    setSearchMoveTargetFile(file);
+  };
+
+  const handleDeepSemanticCheck = React.useCallback(async (fileIds: string[]) => {
+    if (!isEmbeddingConsentGranted()) {
+      throw new Error('Enable embeddings first; expanded OCR text is sent through the configured embedding Worker only with your consent.');
+    }
+    if (!isEmbedConfigured()) throw new Error('The semantic embedding Worker is not configured.');
+    const token = (await ensureValidToken()) || googleAccessToken || (await getAccessToken());
+    if (!token) throw new Error('Sign in to Google Drive before checking more pages.');
+
+    const wanted = new Set(fileIds);
+    const pdfs = files.filter(file =>
+      wanted.has(file.id) && Boolean(file.isGoogleDriveItem) &&
+      (file.mimeType === 'application/pdf' || /\.pdf$/i.test(file.name || ''))
+    );
+    if (!pdfs.length) throw new Error('No Google Drive PDFs were available in this borderline pair.');
+
+    setDeepCheckBusy(true);
+    try {
+      const corpusKey = makeCorpusKey(driveCorpus, sharedDriveId || undefined);
+      const provider = createEmbeddingProvider(() => getFirebaseIdToken());
+      let updated = 0;
+      for (const file of pdfs) {
+        const result = await extractDriveFileTextWithTimeout(
+          token,
+          file.id,
+          file.mimeType || 'application/pdf',
+          file.name || '',
+          { pdfOcrMode: 'expanded' }
+        );
+        const text = result.text.slice(0, MAX_INDEX_CHARS);
+        if (!text.trim()) continue;
+        const chunks = buildEmbeddingChunks(file.name, text);
+        const embedding = await embedAndStoreChunks({
+          provider,
+          fileId: file.id,
+          chunks,
+          corpusKey,
+          driveModifiedTime: file.modifiedTime,
+        });
+        if (embedding.failed) throw new Error(`Could not update semantic vectors for ${file.name}.`);
+        await putIndexedDocument({
+          id: file.id,
+          name: file.name,
+          mimeType: file.mimeType || 'application/pdf',
+          text,
+          source: result.source,
+          driveModifiedTime: file.modifiedTime,
+          textTruncated: result.truncated,
+          extractionPolicyVersion: result.extractionPolicyVersion,
+          pdfCoverage: result.pdfCoverage,
+          corpusKey,
+          preserveVectors: true,
+        });
+        updated++;
+      }
+      if (!updated) throw new Error('No additional PDF text was available to index.');
+    } finally {
+      setDeepCheckBusy(false);
+    }
+  }, [files, ensureValidToken, googleAccessToken, getAccessToken, makeCorpusKey, driveCorpus, sharedDriveId]);
 
   return (
     <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100">
@@ -172,13 +246,16 @@ export default function App() {
               folders={folders}
               onSelectFile={setPreviewFile}
               onMoveFile={f => {
+                setSearchMoveSuggestedFolderId(undefined);
                 setSearchMoveTargets([f]);
                 setSearchMoveTargetFile(f);
               }}
               onMoveFiles={list => {
+                setSearchMoveSuggestedFolderId(undefined);
                 setSearchMoveTargets(list);
                 setSearchMoveTargetFile(list[0] || null);
               }}
+              onReviewFolderSuggestion={handleReviewFolderSuggestion}
               onToggleStar={handleToggleStar}
               onToggleOffline={handleToggleOffline}
               accessToken={googleAccessToken}
@@ -198,6 +275,8 @@ export default function App() {
               onCreateFolder={handleCreateFolder}
               onVerifyHashes={handleVerifyHashes}
               verifyBusy={verifyBusy}
+              onDeepCheck={handleDeepSemanticCheck}
+              deepCheckBusy={deepCheckBusy}
             />
           </React.Suspense>
         )}
@@ -247,6 +326,7 @@ export default function App() {
             onClose={() => setPreviewFile(null)}
             onToggleOffline={() => handleToggleOffline(previewFile.id)}
             onMove={() => {
+              setSearchMoveSuggestedFolderId(undefined);
               setSearchMoveTargets([previewFile]);
               setSearchMoveTargetFile(previewFile);
               setPreviewFile(null);
@@ -270,12 +350,13 @@ export default function App() {
       />
 
       {searchMoveTargets.length > 0 && (
-        <MoveToFolderModal
-          isOpen={searchMoveTargets.length > 0}
-          onClose={closeMoveModal}
-          selectedFiles={searchMoveTargets}
-          folders={folders}
-          allFiles={files}
+          <MoveToFolderModal
+            isOpen={searchMoveTargets.length > 0}
+            onClose={closeMoveModal}
+            selectedFiles={searchMoveTargets}
+            folders={folders}
+            allFiles={files}
+            suggestedFolderId={searchMoveSuggestedFolderId}
           onConfirmMove={(folderId) => {
             handleMoveFilesToFolder(searchMoveTargets.map(f => f.id), folderId);
             closeMoveModal();

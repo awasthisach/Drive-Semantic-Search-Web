@@ -17,6 +17,8 @@ export interface FolderItem {
   color: string;
   description?: string;
   createdAt?: string;
+  /** Google Drive parent folder IDs, used to build a human-readable category path. */
+  parentIds?: string[];
 }
 
 export interface DriveFile {

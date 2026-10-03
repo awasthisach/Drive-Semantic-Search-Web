@@ -1,13 +1,21 @@
 /**
  * Extract searchable text from Google Drive files.
- * PDF/DOCX/XLSX use local binary extraction; scanned PDFs and images fall back to local OCR.
- * Supports AbortSignal so Cancel / per-file timeout can stop long downloads and OCR.
+ * PDF text is extracted page-by-page with PDF.js; Tesseract runs only for sparse
+ * text-layer pages selected by the bounded OCR policy. Other supported binary
+ * formats and Google-native exports remain browser-local.
  */
 
 import { fetchWithBackoff } from './rateLimit';
 import { MAX_INDEX_CHARS } from './contentIndex';
-import { extractDocxText, extractPdfText, extractXlsxText } from './binaryOfficeExtract';
-import { ocrImage, ocrPdf, OcrAbortedError } from './ocrExtract';
+import { extractDocxText, extractXlsxText } from './binaryOfficeExtract';
+import {
+  extractPdfTextWithOcr,
+  ocrImage,
+  OcrAbortedError,
+  PDF_EXTRACTION_POLICY_VERSION,
+  type PdfOcrCoverage,
+  type PdfOcrMode,
+} from './ocrExtract';
 
 const TEXTISH = [
   'text/plain', 'text/csv', 'text/markdown', 'text/html',
@@ -32,6 +40,13 @@ export interface ExtractResult {
   source: 'export' | 'binary-text';
   truncated: boolean;
   note?: string;
+  pdfCoverage?: PdfOcrCoverage;
+  extractionPolicyVersion?: string;
+}
+
+export interface ExtractOptions {
+  /** 'expanded' adds up to five evenly-spaced middle pages for a deliberate deep check. */
+  pdfOcrMode?: PdfOcrMode;
 }
 
 export class ExtractAbortedError extends Error {
@@ -103,7 +118,8 @@ export async function extractDriveFileText(
   fileId: string,
   mimeType: string,
   name: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  options?: ExtractOptions
 ): Promise<ExtractResult> {
   throwIfAborted(signal);
   const m = mimeType || '';
@@ -130,36 +146,44 @@ export async function extractDriveFileText(
     if (!res.ok) throw new Error('Binary media download failed: ' + res.status);
     const { buffer, truncated } = await readBinaryCapped(res, signal);
 
-    let text = '';
     try {
       if (m === 'application/pdf' || extension === 'pdf') {
-        text = await extractPdfText(buffer);
-        if (!text.trim()) {
-          text = await ocrPdf(buffer, signal);
-          if (text.trim()) return { text: text.slice(0, MAX_INDEX_CHARS), source: 'binary-text', truncated: text.length > MAX_INDEX_CHARS, note: 'Scanned/image-only PDF OCR' };
-        }
-      } else if (m.includes('wordprocessingml') || extension === 'docx') {
-        text = await extractDocxText(buffer);
-      } else if (m.includes('spreadsheetml') || extension === 'xlsx') {
-        text = await extractXlsxText(buffer);
-      } else if (IMAGE_MIMES.has(m) || IMAGE_EXTENSIONS.test(name || '')) {
-        text = await ocrImage(buffer, signal);
-        if (text.trim()) return { text: text.slice(0, MAX_INDEX_CHARS), source: 'binary-text', truncated: text.length > MAX_INDEX_CHARS, note: 'Image OCR' };
+        const extracted = await extractPdfTextWithOcr(buffer, {
+          signal,
+          mode: options?.pdfOcrMode ?? 'sample',
+        });
+        const text = extracted.text;
+        return {
+          text: text.slice(0, MAX_INDEX_CHARS),
+          source: 'binary-text',
+          truncated: text.length > MAX_INDEX_CHARS,
+          note: extracted.coverage.deferredPageCount
+            ? `PDF semantic profile uses ${extracted.coverage.sampledPages.length}/${extracted.coverage.totalPages} sampled page(s); OCR is used only when sampled pages lack enough selectable text.`
+            : 'PDF semantic profile includes every page; OCR is used only when a page lacks enough selectable text.',
+          pdfCoverage: extracted.coverage,
+          extractionPolicyVersion: PDF_EXTRACTION_POLICY_VERSION,
+        };
       }
-    } catch (e) {
-      if (e instanceof OcrAbortedError || (e instanceof Error && e.name === 'OcrAbortedError')) {
-        throw new ExtractAbortedError(e.message);
+      if (m.includes('wordprocessingml') || extension === 'docx') {
+        const text = await extractDocxText(buffer);
+        return { text: text.slice(0, MAX_INDEX_CHARS), source: 'binary-text', truncated: truncated || text.length > MAX_INDEX_CHARS };
       }
-      throw e;
+      if (m.includes('spreadsheetml') || extension === 'xlsx') {
+        const text = await extractXlsxText(buffer);
+        return { text: text.slice(0, MAX_INDEX_CHARS), source: 'binary-text', truncated: truncated || text.length > MAX_INDEX_CHARS };
+      }
+      if (IMAGE_MIMES.has(m) || IMAGE_EXTENSIONS.test(name || '')) {
+        const text = await ocrImage(buffer, signal);
+        return { text: text.slice(0, MAX_INDEX_CHARS), source: 'binary-text', truncated: truncated || text.length > MAX_INDEX_CHARS, note: 'Image OCR' };
+      }
+    } catch (error) {
+      if (error instanceof OcrAbortedError || (error instanceof Error && error.name === 'OcrAbortedError')) {
+        throw new ExtractAbortedError(error.message);
+      }
+      throw error;
     }
 
-    if (!text.trim()) {
-      const note = extension === 'pdf' || m === 'application/pdf'
-        ? 'PDF contains no extractable text and OCR found no text.'
-        : 'No extractable text found in binary document.';
-      return { text: '', source: 'binary-text', truncated, note };
-    }
-    return { text: text.slice(0, MAX_INDEX_CHARS), source: 'binary-text', truncated: truncated || text.length > MAX_INDEX_CHARS };
+    return { text: '', source: 'binary-text', truncated, note: 'No extractable text found in binary document.' };
   }
 
   if (m.startsWith('text/') || TEXTISH.includes(m) || /\.(txt|md|csv|json|xml|html|log)$/i.test(name || '')) {
@@ -176,7 +200,7 @@ export async function extractDriveFileTextWithTimeout(
   fileId: string,
   mimeType: string,
   name: string,
-  opts?: { signal?: AbortSignal; timeoutMs?: number }
+  opts?: { signal?: AbortSignal; timeoutMs?: number; pdfOcrMode?: PdfOcrMode }
 ): Promise<ExtractResult> {
   const timeoutMs = opts?.timeoutMs ?? EXTRACT_FILE_TIMEOUT_MS;
   const parent = opts?.signal;
@@ -188,12 +212,12 @@ export async function extractDriveFileTextWithTimeout(
   }
   const timer = globalThis.setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await extractDriveFileText(accessToken, fileId, mimeType, name, controller.signal);
-  } catch (e) {
+    return await extractDriveFileText(accessToken, fileId, mimeType, name, controller.signal, { pdfOcrMode: opts?.pdfOcrMode });
+  } catch (error) {
     if (controller.signal.aborted && !(parent && parent.aborted)) {
       throw new ExtractAbortedError(`Extraction timed out after ${Math.round(timeoutMs / 1000)}s`);
     }
-    throw e;
+    throw error;
   } finally {
     globalThis.clearTimeout(timer);
     parent?.removeEventListener('abort', onParentAbort);
