@@ -1,4 +1,4 @@
-/** Lightweight browser-side extraction for common DOCX/XLSX files.
+/** Lightweight browser-side extraction for common Office Open XML files.
  * No server upload: binaries are downloaded from Drive and parsed locally.
  * PDFs and scanned images are handled by the page-aware pipeline in ocrExtract.ts.
  */
@@ -137,4 +137,30 @@ export async function extractXlsxText(buffer: ArrayBuffer): Promise<string> {
     }
   }
   return rows.join('\n').trim();
+}
+
+
+/** Extract visible text from PowerPoint slide XML in a .pptx ZIP container. */
+export async function extractPptxText(buffer: ArrayBuffer): Promise<string> {
+  const entries = await readZipEntries(buffer);
+  const slides = [...entries.keys()]
+    .filter(key => /^ppt\/slides\/slide\d+\.xml$/i.test(key))
+    .sort((a, b) => {
+      const ai = Number(/slide(\d+)\.xml$/i.exec(a)?.[1] || 0);
+      const bi = Number(/slide(\d+)\.xml$/i.exec(b)?.[1] || 0);
+      return ai - bi;
+    });
+  if (!slides.length) throw new Error('PPTX slide XML missing');
+
+  const parts: string[] = [];
+  for (const slide of slides) {
+    const xml = new TextDecoder().decode(entries.get(slide)!);
+    const text = [...xml.matchAll(/<a:t\b[^>]*>([\s\S]*?)<\/a:t>/gi)]
+      .map(match => decodeXmlEntities(match[1]))
+      .join(' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (text) parts.push(text);
+  }
+  return parts.join('\n').trim();
 }
