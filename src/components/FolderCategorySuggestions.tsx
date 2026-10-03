@@ -20,6 +20,7 @@ interface FolderCategorySuggestionsProps {
   corpusKey: string;
   refreshKey?: number;
   onReviewMove: (file: DriveFile, folderId: string) => void;
+  onRequestIndex?: () => void;
 }
 
 interface CachedFolderEmbedding {
@@ -49,6 +50,7 @@ export const FolderCategorySuggestions: React.FC<FolderCategorySuggestionsProps>
   corpusKey,
   refreshKey = 0,
   onReviewMove,
+  onRequestIndex,
 }) => {
   const [indexedFiles, setIndexedFiles] = useState<DriveFile[]>([]);
   const [selectedFileId, setSelectedFileId] = useState('');
@@ -194,7 +196,7 @@ export const FolderCategorySuggestions: React.FC<FolderCategorySuggestionsProps>
         <button
           type="button"
           onClick={() => void suggestFolders()}
-          disabled={!selectedFile || loading || !folders.length}
+          disabled={loading || !folders.length}
           className="inline-flex items-center gap-1 px-3 py-2 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-[11px] font-bold disabled:opacity-50"
         >
           {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
@@ -202,6 +204,15 @@ export const FolderCategorySuggestions: React.FC<FolderCategorySuggestionsProps>
         </button>
       </div>
       {status && <p className="text-[10px] text-zinc-500" role="status">{status}</p>}
+      {!indexedFiles.length && onRequestIndex && !loading && (
+        <button
+          type="button"
+          onClick={onRequestIndex}
+          className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-violet-300 text-violet-700 dark:text-violet-300 text-[10px] font-semibold hover:bg-violet-50 dark:hover:bg-violet-950/40"
+        >
+          Index content to enable suggestions
+        </button>
+      )}
       {suggestions.length > 0 && selectedFile && (
         <div className="space-y-1.5">
           {suggestions.map(suggestion => (

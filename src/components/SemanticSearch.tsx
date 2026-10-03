@@ -658,6 +658,7 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
         corpusKey={corpusKey}
         refreshKey={indexedCount}
         onReviewMove={(file, folderId) => onReviewFolderSuggestion?.(file, folderId)}
+        onRequestIndex={() => void handleIndexContent()}
       />
 
       {results.length > 0 && (
