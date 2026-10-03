@@ -18,7 +18,7 @@ function keepCandidateScore(file: DriveFile, peers: DriveFile[]): KeepCandidate 
   if (file.isOffline) { score += 15; reasons.push('available offline'); }
   if (file.folderId && file.folderId !== 'root') { score += 8; reasons.push('organized in a folder'); }
   if (file.semanticSummary && file.semanticSummary.length >= 80) { score += 4; reasons.push('richer metadata'); }
-  if (/\\b(copy|duplicate|dup)\\b|\\(copy(?: \\d+)?\\)|\\(\\d+\\)$/i.test(normalizedName)) {
+  if (/\b(copy|duplicate|dup)\b|\(copy(?: \d+)?\)|\(\d+\)$/i.test(normalizedName)) {
     score -= 25;
     reasons.push('copy/duplicate naming penalty');
   }
