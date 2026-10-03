@@ -110,6 +110,7 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
   const [currentPage, setCurrentPage] = useState(1);
   const [searching, setSearching] = useState(false);
   const [indexedCount, setIndexedCount] = useState(0);
+  const [indexRefreshTick, setIndexRefreshTick] = useState(0);
   const [indexing, setIndexing] = useState(false);
   const [indexProgress, setIndexProgress] = useState('');
   const [searchStatus, setSearchStatus] = useState('');
@@ -339,6 +340,7 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
     let skippedFresh = 0;
     let truncated = 0;
     let sampledPdf = 0;
+    let semanticRefreshCounter = 0;
     const failedNames: string[] = [];
     const n = extractable.length;
     const embeddingProvider = isEmbedConfigured()
@@ -410,6 +412,11 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
                   fail++;
                   embeddingFail++;
                   if (failedNames.length < 5) failedNames.push(f.name);
+                } else {
+                  semanticRefreshCounter++;
+                  if (semanticRefreshCounter === 1 || semanticRefreshCounter % 10 === 0) {
+                    setIndexRefreshTick(value => value + 1);
+                  }
                 }
               }
             }
@@ -498,6 +505,10 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
 
           if (textWasTruncated) truncated++;
           if (pdfCoverage && pdfCoverage.deferredPageCount > 0) sampledPdf++;
+          semanticRefreshCounter++;
+          if (semanticRefreshCounter === 1 || semanticRefreshCounter % 10 === 0) {
+            setIndexRefreshTick(value => value + 1);
+          }
           ok++;
           markCompleted(i);
         } catch (err: any) {
@@ -675,7 +686,7 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
         files={files}
         folders={folders}
         corpusKey={corpusKey}
-        refreshKey={indexedCount}
+        refreshKey={indexRefreshTick}
         onReviewMove={(file, folderId) => onReviewFolderSuggestion?.(file, folderId)}
         onRequestIndex={() => void handleIndexContent()}
       />
