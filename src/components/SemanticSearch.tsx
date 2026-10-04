@@ -606,7 +606,7 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
       document.removeEventListener('visibilitychange', onVisibility);
       window.removeEventListener('focus', tryAutoResume);
     };
-  }, [accessToken, resumeFrom]);
+  }, [accessToken, resumeFrom, handleIndexContent]);
 
   useEffect(() => {
     let cancelled = false;
