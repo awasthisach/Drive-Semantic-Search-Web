@@ -80,7 +80,7 @@ export const AuthErrorModal: React.FC<AuthErrorModalProps> = ({
                 🌐 डोमेन ऑथराइजेशन की आवश्यकता (Domain Authorization):
               </p>
               <p className="text-zinc-300">
-                Google सुरक्षा कारणों से इस नए डेवलपमेंट लिंक को नहीं पहचान पा रहा है। इसे ठीक करने के लिए आपको Google Cloud Console में OAuth 2.0 Client IDs सेटिंग में <span className="text-white font-semibold">Authorized JavaScript origins</span> में यह लिंक (<code className="text-blue-300 bg-blue-950 px-1 py-0.5 rounded font-mono">https://ais-dev-y3xuzxdnayshpet3dy7dlt-608230001000.asia-southeast1.run.app</code>) जोड़ना होगा।
+                Google सुरक्षा कारणों से इस deployment origin को नहीं पहचान पा रहा है। इसे ठीक करने के लिए Google Cloud Console में OAuth 2.0 Client IDs की <span className="text-white font-semibold">Authorized JavaScript origins</span> सूची में live app origin (<code className="text-blue-300 bg-blue-950 px-1 py-0.5 rounded font-mono">https://awasthisach.github.io</code>) और local development origin (<code className="text-blue-300 bg-blue-950 px-1 py-0.5 rounded font-mono">http://localhost:3000</code>) जोड़ें।
               </p>
             </>
           ) : (

@@ -90,7 +90,7 @@ After installing dependencies with `npm ci --ignore-scripts --no-audit --no-fund
 
 - `npm test -- --run` — **passed: 17 test files, 71 tests**.
 - `npm run lint` (`tsc --noEmit`) — **passed**.
-- `npm run build` — **passed**. Vite emitted a non-fatal warning that `./error-suppress.js` cannot be bundled without `type="module"`.
+- `npm run build` — **passed** with no `error-suppress.js` bundling warning; the handler is now part of the Vite module graph.
 
 At the audited baseline, tests did not exercise the key failure windows found here: Changes pagination cap/checkpoint behavior, checkpoint-vs-snapshot crash ordering, content-index replacement, swallowed index deletion, or invalidation of SHA after Drive revision changes. The remediation tests below add coverage for these critical state transitions.
 
@@ -123,4 +123,4 @@ The audited findings above describe the baseline revision `5391421`; the followi
 
 **Remaining known limits:** browser storage is split across IndexedDB databases, so a single transaction cannot atomically commit BM25 and vector mutations together; failures now propagate and re-index/retry is the recovery path. ANN retrieval remains approximate and does not guarantee nearest-neighbor recall when candidate buckets return results. Native Google hashes remain hashes of export bytes. The Worker rate limiter remains isolate-local. These are disclosed in the README rather than presented as solved guarantees.
 
-**Post-remediation local validation:** `npm test -- --run` passed **20 test files / 89 tests**; `npm run lint` (TypeScript) passed; `npm run test:idb` passed (10 tests); `npm run build` passed with the existing non-fatal `error-suppress.js` bundling warning; `npm run check:bundle` passed; both remaining workflow YAML files parsed; and the lockfile consistency check produced no `package-lock.json` diff. A truncation-counter name collision and one incorrect test expectation were caught and fixed before the final passing run.
+**Post-remediation local validation:** `npm test -- --run` passed **25 test files / 122 tests**; `npm run lint` (TypeScript) passed; `npm run build` passed with no `error-suppress.js` bundling warning; `npm run check:dist` and `npm run check:bundle` passed; and the lockfile remained unchanged. A truncation-counter name collision and one incorrect test expectation were caught and fixed before the final passing run.
