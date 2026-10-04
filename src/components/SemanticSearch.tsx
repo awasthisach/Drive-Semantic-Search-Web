@@ -413,6 +413,7 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
                   embeddingFail++;
                   if (failedNames.length < 5) failedNames.push(f.name);
                   // Keep the cursor before failures so the next run retries this file.
+                  return;
                 } else {
                   semanticRefreshCounter++;
                   if (semanticRefreshCounter === 1 || semanticRefreshCounter % 10 === 0) {
