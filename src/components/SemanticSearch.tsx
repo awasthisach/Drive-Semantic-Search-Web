@@ -412,6 +412,7 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
                   fail++;
                   embeddingFail++;
                   if (failedNames.length < 5) failedNames.push(f.name);
+                  // Keep the cursor before failures so the next run retries this file.
                 } else {
                   semanticRefreshCounter++;
                   if (semanticRefreshCounter === 1 || semanticRefreshCounter % 10 === 0) {
@@ -473,7 +474,6 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
                 fail++;
                 if (failedNames.length < 5) failedNames.push(f.name);
                 logDiag('warn', 'index.embed', `staged embedding failed; retained prior index for ${f.name}`);
-                markCompleted(i);
                 return;
               }
             } catch (embedErr) {
@@ -482,7 +482,6 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
               embeddingFail++;
               fail++;
               if (failedNames.length < 5) failedNames.push(f.name);
-              markCompleted(i);
               return;
             }
           }
@@ -526,7 +525,8 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
           if (failedNames.length < 5) failedNames.push(f.name);
           console.warn('[SemanticSearch] index failed for', f.name, err);
           logDiag('warn', 'index.file', `fail ${f.name}: ${err?.message || err}`);
-          markCompleted(i);
+          // Keep the cursor before failed files so a subsequent run retries them.
+          return;
         }
  
       };
@@ -556,6 +556,11 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
             (failedNames.length ? `. Failed: ${failedNames.join(', ')}` : '');
         setIndexProgress(doneMsg);
         logDiag('info', 'index', doneMsg);
+      } else if (!cancelIndexRef.current && !indexController.signal.aborted && fail > 0) {
+        const retryMsg = `Indexing paused with ${fail} failed file${fail === 1 ? '' : 's'}. Successful work is saved; retry from ${contiguousCursor + 1}/${n}.` + (failedNames.length ? ` Failed: ${failedNames.join(', ')}` : '');
+        setIndexProgress(retryMsg);
+        setResumeFrom(contiguousCursor);
+        logDiag('warn', 'index', retryMsg);
       }
     } finally {
       indexingActiveRef.current = false;
