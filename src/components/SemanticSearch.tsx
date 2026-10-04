@@ -16,6 +16,7 @@ import {
 import { highlightSegments } from '../lib/searchHighlight';
 import { embedAndStoreChunks, hasCompatibleVectorSet, warmAnnIndex } from '../lib/vectorIndex';
 import { isEmbedConfigured } from '../lib/embeddings/config';
+import { isEmbeddingConsentGranted } from '../lib/embeddings/consent';
 import { createEmbeddingProvider } from '../lib/embeddings/client';
 import { getFirebaseIdToken } from '../lib/firebaseAuth';
 import { paginateResults } from '../lib/pagination';
@@ -126,6 +127,8 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
     [results, currentPage]
   );
   const CURSOR_KEY = 'content-index-cursor';
+  const INDEX_RUN_KEY = 'content-index-run-active';
+  const autoResumeAttemptedRef = useRef(false);
 
   const releaseWakeLock = useCallback(async () => {
     const lock = wakeLockRef.current;
@@ -183,7 +186,7 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
   };
   const readCursor = (sig: string, n: number): number => {
     try {
-      const raw = sessionStorage.getItem(CURSOR_KEY);
+      const raw = localStorage.getItem(CURSOR_KEY);
       if (!raw) return 0;
       const [storedSig, idx] = raw.split('|');
       if (storedSig !== sig) return 0;
@@ -194,11 +197,11 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
   };
   const writeCursor = (sig: string, i: number) => {
     try {
-      sessionStorage.setItem(CURSOR_KEY, sig + '|' + String(i));
+      localStorage.setItem(CURSOR_KEY), sig + '|' + String(i));
     } catch { /* ignore */ }
   };
   const clearCursor = () => {
-    try { sessionStorage.removeItem(CURSOR_KEY); } catch { /* ignore */ }
+    try { localStorage.removeItem(CURSOR_KEY); } catch { /* ignore */ }
   };
 
   const copyLink = async (file: DriveFile) => {
@@ -223,7 +226,7 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
   useEffect(() => {
     refreshIndexedCount();
     try {
-      const raw = sessionStorage.getItem(CURSOR_KEY);
+      const raw = localStorage.getItem(CURSOR_KEY);
       if (!raw) setResumeFrom(0);
       else {
         const parts = raw.split('|');
@@ -297,6 +300,12 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
       return;
     }
 
+    if (isEmbedConfigured() && !isEmbeddingConsentGranted()) {
+      setIndexProgress('Enable embeddings first. Neural indexing will not start until content-sharing consent is granted.');
+      logDiag('warn', 'index', 'embedding consent required before indexing');
+      return;
+    }
+
     const extractable = files.filter(
       f =>
         f.isGoogleDriveItem &&
@@ -319,6 +328,7 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
     );
 
     cancelIndexRef.current = false;
+    try { localStorage.setItem(INDEX_RUN_KEY, '1'); } catch { /* ignore */ }
     indexAbortRef.current?.abort();
     const indexController = new AbortController();
     indexAbortRef.current = indexController;
@@ -548,6 +558,7 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
 
       if (!cancelIndexRef.current && !indexController.signal.aborted && contiguousCursor >= n) {
         clearCursor();
+        try { localStorage.removeItem(INDEX_RUN_KEY); } catch { /* ignore */ }
         setResumeFrom(0);
         const doneMsg =
           `Done (${scopeLabel}). Indexed ${ok}, skipped fresh ${skippedFresh}, failed ${fail}` +
@@ -571,6 +582,31 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
       await refreshIndexedCount();
     }
   };
+
+  // Mobile browsers may discard a backgrounded page. Keep the cursor durable and
+  // resume an interrupted run automatically when the page becomes visible again.
+  useEffect(() => {
+    const tryAutoResume = () => {
+      if (document.visibilityState !== 'visible' || indexingActiveRef.current || autoResumeAttemptedRef.current) return;
+      let active = false;
+      try { active = localStorage.getItem(INDEX_RUN_KEY) === '1'; } catch { /* ignore */ }
+      if (!active || resumeFrom <= 0 || !accessToken) return;
+      autoResumeAttemptedRef.current = true;
+      setIndexProgress('Resuming interrupted indexing from ' + (resumeFrom + 1) + '…');
+      void handleIndexContent();
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') autoResumeAttemptedRef.current = false;
+      else tryAutoResume();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('focus', tryAutoResume);
+    tryAutoResume();
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('focus', tryAutoResume);
+    };
+  }, [accessToken, resumeFrom]);
 
   useEffect(() => {
     let cancelled = false;
@@ -645,6 +681,7 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
               className="px-2 py-0.5 rounded border border-red-400 text-red-600 hover:bg-red-50"
               onClick={() => {
                 cancelIndexRef.current = true;
+                try { localStorage.removeItem(INDEX_RUN_KEY); } catch { /* ignore */ }
                 indexAbortRef.current?.abort();
                 setIndexProgress('Cancelling…');
                 logDiag('info', 'index', 'cancel requested');
