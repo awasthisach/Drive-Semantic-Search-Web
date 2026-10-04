@@ -197,7 +197,7 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
   };
   const writeCursor = (sig: string, i: number) => {
     try {
-      localStorage.setItem(CURSOR_KEY), sig + '|' + String(i));
+      localStorage.setItem(CURSOR_KEY, sig + '|' + String(i));
     } catch { /* ignore */ }
   };
   const clearCursor = () => {
