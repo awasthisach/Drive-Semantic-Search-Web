@@ -22,6 +22,24 @@ export const HYBRID_WEIGHTS = {
   metadata: 0.2,
 } as const;
 
+/**
+ * Session-local query embedding cache. Interactive search often reuses the same
+ * query/variant; caching avoids repeated Worker calls and reduces rate-limit
+ * pressure without persisting embeddings or query text to IndexedDB.
+ */
+const QUERY_EMBED_CACHE_LIMIT = 64;
+const queryEmbeddingCache = new Map<string, number[]>();
+
+function rememberQueryEmbedding(key: string, embedding: number[]): void {
+  if (queryEmbeddingCache.has(key)) queryEmbeddingCache.delete(key);
+  queryEmbeddingCache.set(key, embedding);
+  while (queryEmbeddingCache.size > QUERY_EMBED_CACHE_LIMIT) {
+    const oldest = queryEmbeddingCache.keys().next().value;
+    if (oldest === undefined) break;
+    queryEmbeddingCache.delete(oldest);
+  }
+}
+
 const STOPWORDS = new Set([
   'a', 'an', 'the', 'and', 'or', 'of', 'to', 'in', 'on', 'for', 'is', 'are', 'was', 'were',
   'be', 'been', 'it', 'this', 'that', 'with', 'from', 'by', 'as', 'at', 'into', 'about',
@@ -94,7 +112,14 @@ async function tryNeuralSearch(
     let succeeded = 0;
     for (const variant of variants) {
       try {
-        const qVec = await provider.embedQuery(variant);
+        const cacheKey = [
+          provider.embeddingModel,
+          provider.embeddingVersion,
+          variant.trim().toLowerCase(),
+        ].join('|');
+        const cached = queryEmbeddingCache.get(cacheKey);
+        const qVec = cached || await provider.embedQuery(variant);
+        if (!cached) rememberQueryEmbedding(cacheKey, qVec);
         if (!qVec.length) continue;
         succeeded++;
         const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
