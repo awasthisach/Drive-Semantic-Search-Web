@@ -6,6 +6,7 @@ import { EMBED_CONFIG, isEmbedConfigured } from '../lib/embeddings/config';
 import { isEmbeddingConsentGranted } from '../lib/embeddings/consent';
 import { getFirebaseIdToken } from '../lib/firebaseAuth';
 import { getVectorsForFile, listVectors, type VectorRecord } from '../lib/vectorIndex';
+import { getIndexedDocument, listIndexedDocuments, buildEmbeddingChunks } from '../lib/contentIndex';
 import { isLegacyTitleEmbeddingChunk } from '../lib/contentIndex';
 import {
   averageEmbedding,
@@ -62,25 +63,24 @@ export const FolderCategorySuggestions: React.FC<FolderCategorySuggestionsProps>
 
   const refreshIndexedFiles = useCallback(async () => {
     try {
-      const vectors = await listVectors(corpusKey);
-      const liveIds = new Set(files.map(file => file.id));
+      const [docs, vectors] = await Promise.all([listIndexedDocuments(corpusKey), listVectors(corpusKey)]);
+      const liveById = new Map(files.filter(file => file.isGoogleDriveItem).map(file => [file.id, file]));
       const legacyIds = new Set(vectors
-        .filter(vector => liveIds.has(vector.fileId) && isLegacyTitleEmbeddingChunk(vector.text))
+        .filter(vector => liveById.has(vector.fileId) && isLegacyTitleEmbeddingChunk(vector.text))
         .map(vector => vector.fileId));
-      const ids = new Set(vectors
+      const compatibleVectorIds = new Set(vectors
         .filter(vector => !legacyIds.has(vector.fileId) && vector.embeddingModel === EMBED_CONFIG.model && vector.embeddingVersion === EMBED_CONFIG.version && vector.dimension === EMBED_CONFIG.dimension)
         .map(vector => vector.fileId));
-      const available = files
-        .filter(file => ids.has(file.id) && Boolean(file.isGoogleDriveItem))
+      const available = docs
+        .map(doc => liveById.get(doc.id))
+        .filter((file): file is DriveFile => Boolean(file))
         .sort((a, b) => a.name.localeCompare(b.name));
       setIndexedFiles(available);
       setSelectedFileId(current => available.some(file => file.id === current) ? current : (available[0]?.id || ''));
       setSuggestions([]);
       setStatus(available.length
-        ? `${available.length} content-only indexed Drive file(s) available. Choose one to suggest a folder.${legacyIds.size ? ` ${legacyIds.size} legacy profile(s) excluded; run Search → All → Index / Rebuild to migrate them.` : ''}`
-        : legacyIds.size
-          ? `${legacyIds.size} legacy filename-bearing profile(s) found. Run Search → All → Index / Rebuild once to migrate them before requesting folder suggestions.`
-          : 'No compatible indexed Drive vectors yet. Index content and enable embeddings first.');
+        ? available.length + ' indexed Drive file(s) available. ' + (compatibleVectorIds.size ? compatibleVectorIds.size + ' already have semantic vectors.' : 'Semantic profiles will be generated when you request a suggestion.') + (legacyIds.size ? ' ' + legacyIds.size + ' legacy profile(s) excluded from semantic scoring.' : '')
+        : 'No indexed Drive files yet. Index content first.');
     } catch (error) {
       setStatus(`Could not load indexed vectors: ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -113,10 +113,25 @@ export const FolderCategorySuggestions: React.FC<FolderCategorySuggestionsProps>
     try {
       const provider = createEmbeddingProvider(() => getFirebaseIdToken());
       const rows = (await getVectorsForFile(selectedFile.id, corpusKey)).filter(row => compatibleVector(row, provider));
-      const profile = averageEmbedding(rows.map(row => row.embedding));
+      let profile = averageEmbedding(rows.map(row => row.embedding));
       if (!profile.length) {
-        setStatus('This file has no compatible semantic profile. Re-index it with embeddings enabled.');
-        return;
+        if (!isEmbeddingConsentGranted()) {
+          setStatus('Enable embeddings first. The selected file text is sent only to the authenticated embedding Worker after consent.');
+          return;
+        }
+        const indexed = await getIndexedDocument(selectedFile.id);
+        if (!indexed?.text) {
+          setStatus('This indexed file has no searchable text. Re-index it before requesting a folder suggestion.');
+          return;
+        }
+        setStatus('Building the semantic profile for “' + selectedFile.name + '”…');
+        const chunks = buildEmbeddingChunks(indexed.name || selectedFile.name, indexed.text);
+        const embedded = await provider.embedDocuments(chunks);
+        profile = averageEmbedding(embedded);
+        if (!profile.length) {
+          setStatus('Could not build a semantic profile for this file. Retry after confirming embeddings are enabled.');
+          return;
+        }
       }
 
       const folderTexts = buildFolderEmbeddingTexts(folders);
