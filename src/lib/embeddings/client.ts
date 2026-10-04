@@ -32,6 +32,21 @@ export class EmbedApiError extends Error {
 
 export { ConsentRequiredError };
 
+const EMBED_REQUEST_MIN_INTERVAL_MS = 2000;
+let lastEmbedRequestAt = 0;
+let embedRequestGate: Promise<void> = Promise.resolve();
+
+async function waitForEmbedRequestSlot(): Promise<void> {
+  let release!: () => void;
+  const previous = embedRequestGate;
+  embedRequestGate = new Promise<void>(resolve => { release = resolve; });
+  await previous;
+  const wait = Math.max(0, EMBED_REQUEST_MIN_INTERVAL_MS - (Date.now() - lastEmbedRequestAt));
+  if (wait > 0) await sleep(wait);
+  lastEmbedRequestAt = Date.now();
+  release();
+}
+
 /**
  * Calls the authenticated backend /embed endpoint.
  * API keys never live in the browser — only a Firebase ID token is sent.
@@ -85,6 +100,7 @@ export class BackendEmbeddingProvider implements EmbeddingProvider {
       const token = await this.getIdToken();
       if (!token) throw new EmbedAuthError('Sign in required to generate embeddings');
 
+      await waitForEmbedRequestSlot();
       const controller = new AbortController();
       const timeout = globalThis.setTimeout(() => controller.abort(), timeoutMs);
       try {
