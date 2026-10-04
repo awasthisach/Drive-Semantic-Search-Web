@@ -26,6 +26,7 @@ const IMAGE_EXTENSIONS = /\.(png|jpe?g|webp|bmp|gif|tiff?)$/i;
 const BINARY_MIMES = new Set([
   'application/pdf',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-word.document.macroEnabled.12',
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   'application/vnd.openxmlformats-officedocument.presentationml.presentation',
   'application/vnd.ms-powerpoint.presentation.macroEnabled.12',
@@ -166,7 +167,7 @@ export async function extractDriveFileText(
           extractionPolicyVersion: PDF_EXTRACTION_POLICY_VERSION,
         };
       }
-      if (m.includes('wordprocessingml') || extension === 'docx') {
+      if (m.includes('wordprocessingml') || m.includes('ms-word') || extension === 'docx' || extension === 'docm') {
         const text = await extractDocxText(buffer);
         return { text: text.slice(0, MAX_INDEX_CHARS), source: 'binary-text', truncated: truncated || text.length > MAX_INDEX_CHARS };
       }

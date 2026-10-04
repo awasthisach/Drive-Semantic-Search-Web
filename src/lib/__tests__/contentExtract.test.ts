@@ -142,6 +142,7 @@ describe('binary document and OCR support', () => {
   it('recognizes supported MIME types', () => {
     expect(canExtractText('application/pdf', 'report.pdf')).toBe(true);
     expect(canExtractText('application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'report.docx')).toBe(true);
+    expect(canExtractText('application/vnd.ms-word.document.macroEnabled.12', 'report.docm')).toBe(true);
     expect(canExtractText('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'report.xlsx')).toBe(true);
     expect(canExtractText('application/vnd.openxmlformats-officedocument.presentationml.presentation', 'deck.pptx')).toBe(true);
     expect(canExtractText('image/png', 'scan.png')).toBe(true);
