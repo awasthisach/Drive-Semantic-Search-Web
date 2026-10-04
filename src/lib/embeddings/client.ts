@@ -7,6 +7,22 @@ import {
   type EmbeddingPolicy,
 } from './consent';
 
+const EMBED_REQUEST_MIN_INTERVAL_MS = 2_000;
+let embedRequestGate: Promise<void> = Promise.resolve();
+let nextEmbedRequestAt = 0;
+
+/** Serialize Worker requests and pace starts below the per-user rate limit. */
+async function waitForEmbedRequestSlot(): Promise<void> {
+  const previous = embedRequestGate;
+  let release!: () => void;
+  embedRequestGate = new Promise<void>(resolve => { release = resolve; });
+  await previous;
+  const waitMs = Math.max(0, nextEmbedRequestAt - Date.now());
+  if (waitMs > 0) await sleep(waitMs);
+  nextEmbedRequestAt = Date.now() + EMBED_REQUEST_MIN_INTERVAL_MS;
+  release();
+}
+
 export class EmbedConfigError extends Error {
   constructor(message: string) {
     super(message);
@@ -88,6 +104,7 @@ export class BackendEmbeddingProvider implements EmbeddingProvider {
       const controller = new AbortController();
       const timeout = globalThis.setTimeout(() => controller.abort(), timeoutMs);
       try {
+        await waitForEmbedRequestSlot();
         const res = await fetch(EMBED_CONFIG.endpoint, {
           method: 'POST',
           headers: {
