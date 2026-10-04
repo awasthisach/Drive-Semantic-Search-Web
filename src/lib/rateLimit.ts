@@ -30,10 +30,10 @@ export type BackoffOpts = {
 
 /**
  * Fetch with exponential backoff on safe reads that receive 429 / explicitly
- * identified rate-limit 403, and on per-attempt timeouts. Mutating methods are
- * returned without retry to avoid duplicating resource creation after an
- * ambiguous request outcome. Pass AbortSignal via init.signal — caller aborts
- * are never retried.
+ * identified rate-limit 403, per-attempt timeouts, and short-lived network
+ * failures such as "Failed to fetch". Mutating methods are never retried after
+ * an ambiguous outcome. Pass AbortSignal via init.signal — caller aborts are
+ * never retried.
  */
 export async function fetchWithBackoff(
   input: RequestInfo | URL,
@@ -42,6 +42,7 @@ export async function fetchWithBackoff(
 ): Promise<Response> {
   const maxRetries = opts.maxRetries ?? 5;
   const baseMs = opts.baseMs ?? 500;
+  const networkRetries = Math.min(maxRetries, 2);
   let last: Response | null = null;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -49,6 +50,8 @@ export async function fetchWithBackoff(
       throw new DOMException('The operation was aborted.', 'AbortError');
     }
 
+    const method = (init?.method || 'GET').toUpperCase();
+    const retrySafe = method === 'GET' || method === 'HEAD' || method === 'OPTIONS';
     let attemptInit = init;
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
     let timedOut = false;
@@ -70,8 +73,6 @@ export async function fetchWithBackoff(
       const res = await fetch(input, attemptInit);
       last = res;
       if (res.ok) return res;
-      const method = (init?.method || 'GET').toUpperCase();
-      const retrySafe = method === 'GET' || method === 'HEAD' || method === 'OPTIONS';
       if (!retrySafe || !(await isRateLimitResponse(res)) || attempt === maxRetries) {
         return res;
       }
@@ -88,13 +89,22 @@ export async function fetchWithBackoff(
       );
       await sleep(waitMs);
     } catch (error) {
-      if (!timedOut || attempt === maxRetries) throw error;
+      if (init?.signal?.aborted) throw error;
+      const shouldRetryNetwork =
+        retrySafe && !timedOut && attempt < networkRetries;
+      const shouldRetryTimeout =
+        retrySafe && timedOut && attempt < maxRetries;
+      if (!shouldRetryNetwork && !shouldRetryTimeout) {
+        throw error;
+      }
+      const retryAttempt = attempt + 1;
       const waitMs = Math.min(
         Math.round(baseMs * Math.pow(2, attempt) * (0.75 + Math.random() * 0.5)),
         60_000
       );
+      const reason = timedOut ? 'timeout' : (error instanceof Error ? error.message : String(error));
       console.warn(
-        `[rateLimit] ${opts.label || 'Drive API'} timeout, retry ${attempt + 1}/${maxRetries} in ${waitMs}ms`
+        `[rateLimit] ${opts.label || 'Drive API'} network/timeout error (${reason}), retry ${retryAttempt}/${timedOut ? maxRetries : networkRetries} in ${waitMs}ms`
       );
       await sleep(waitMs);
     } finally {
