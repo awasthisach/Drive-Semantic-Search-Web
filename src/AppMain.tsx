@@ -85,7 +85,23 @@ export default function App() {
   const [searchMoveSuggestedFolderId, setSearchMoveSuggestedFolderId] = React.useState<string | undefined>();
   const [consentModalOpen, setConsentModalOpen] = React.useState(false);
   const [embedConsentOn, setEmbedConsentOn] = React.useState(() => isEmbeddingConsentGranted());
+  const [firebaseEmbedReady, setFirebaseEmbedReady] = React.useState(false);
   const [deepCheckBusy, setDeepCheckBusy] = React.useState(false);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    const check = async () => {
+      if (!isGoogleConnected || !isEmbedConfigured()) {
+        if (!cancelled) setFirebaseEmbedReady(false);
+        return;
+      }
+      const idToken = await getFirebaseIdToken();
+      if (!cancelled) setFirebaseEmbedReady(Boolean(idToken));
+    };
+    void check();
+    const timer = window.setInterval(() => { void check(); }, 5000);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, [isGoogleConnected, googleAccessToken]);
 
   React.useEffect(() => {
     if (searchMoveTargetFile) {
@@ -195,6 +211,14 @@ export default function App() {
             >
               {embedConsentOn ? 'Embeddings on' : 'Enable embeddings'}
             </button>
+          ) : null}
+          {isEmbedConfigured() && embedConsentOn ? (
+            <span
+              className={`text-[10px] px-2 py-1 rounded-full border ${firebaseEmbedReady ? 'border-emerald-300 text-emerald-700' : 'border-amber-300 text-amber-700'}`}
+              title={firebaseEmbedReady ? 'Firebase Authenticated for embedding requests' : 'Google Drive is connected, but Firebase Auth is not ready for embedding requests'}
+            >
+              {firebaseEmbedReady ? 'Firebase embedding auth' : 'Firebase auth needed'}
+            </span>
           ) : null}
           <button type="button" onClick={downloadDiagnostics} className="text-xs px-2 py-1 rounded-lg border border-zinc-200 dark:border-zinc-700" title="Export local diagnostics JSON (tokens redacted)">Diagnostics</button>
           {isGoogleConnected ? (

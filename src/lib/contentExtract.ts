@@ -218,8 +218,19 @@ export async function extractDriveFileTextWithTimeout(
     parent.addEventListener('abort', onParentAbort, { once: true });
   }
   const timer = globalThis.setTimeout(() => controller.abort(), timeoutMs);
+  const extraction = extractDriveFileText(
+    accessToken,
+    fileId,
+    mimeType,
+    name,
+    controller.signal,
+    { pdfOcrMode: opts?.pdfOcrMode },
+  );
+  const deadline = new Promise<ExtractResult>((_, reject) => {
+    globalThis.setTimeout(() => reject(new ExtractAbortedError(`Extraction timed out after ${Math.round(timeoutMs / 1000)}s`)), timeoutMs);
+  });
   try {
-    return await extractDriveFileText(accessToken, fileId, mimeType, name, controller.signal, { pdfOcrMode: opts?.pdfOcrMode });
+    return await Promise.race([extraction, deadline]);
   } catch (error) {
     if (controller.signal.aborted && !(parent && parent.aborted)) {
       throw new ExtractAbortedError(`Extraction timed out after ${Math.round(timeoutMs / 1000)}s`);
