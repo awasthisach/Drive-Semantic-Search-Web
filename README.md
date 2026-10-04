@@ -36,9 +36,9 @@ The search pipeline combines three signals:
 
 Neural **document vectors are content-only** so renaming a file does not alter its semantic content profile. Filenames remain searchable through the metadata signal; BM25 indexes extracted body text. After upgrading from an earlier build that embedded a title into each vector, set the Search scope to **All** and press **Index / Rebuild** once to migrate stored vectors. Compatible cached extracted text is reused for that migration; PDFs with missing/outdated extraction-policy metadata are re-extracted using the bounded policy below. Duplicate and folder-suggestion screens exclude legacy filename-bearing profiles until they are migrated.
 
-The hybrid weights in `src/lib/searchEngine.ts` are provisional and are not calibrated against a representative production corpus. Hindi/Hinglish query expansion is lightweight and rule-based, not a full translation system.
+The hybrid weights in `src/lib/searchEngine.ts` are provisional and are not calibrated against a representative production corpus. Hindi/Hinglish query expansion is lightweight and rule-based, not a full translation system. Neural retrieval is a true embedding-based signal; BM25 and metadata remain complementary lexical and precision signals rather than substitutes for embeddings.
 
-For larger vector collections, search uses a versioned, rebuildable IndexedDB locality-sensitive hashing (LSH) candidate index and exact cosine reranking of those candidates. This is approximate retrieval: a non-empty ANN candidate set can omit a true nearest neighbor. An exact scan is used when the ANN path returns no qualified hit. The deterministic relevance fixture is a regression test, not a production recall benchmark.
+For larger vector collections, search uses a versioned, rebuildable IndexedDB locality-sensitive hashing (LSH) candidate index followed by exact cosine reranking. A recall guard also falls back to an exact corpus scan when the ANN neighborhood is sparse or its best similarity is weak, so ANN is treated only as an accelerator and never as the semantic relevance gate. The deterministic relevance fixture is a regression test, not a production recall benchmark.
 
 ### Supported extraction
 
@@ -46,7 +46,7 @@ For larger vector collections, search uses a versioned, rebuildable IndexedDB lo
 - **Google Sheets:** CSV export.
 - **Google Slides:** plain-text export.
 - **Text-like files:** TXT, CSV, Markdown, HTML, JSON, XML, and logs.
-- **DOCX/XLSX:** lightweight browser-side extraction from their Office Open XML containers; these are not full-fidelity Office renderers. PPTX parsing is not implemented.
+- **DOCX/DOCM/XLSX/XLSM/PPTX/PPTM:** lightweight browser-side extraction from their Office Open XML containers; these are not full-fidelity Office renderers and do not attempt to reproduce Office layout, charts, formulas, or macros.
 - **PDF:** PDF.js extracts selectable text page by page. Scanned/sparse-text pages use Tesseract.js OCR (`eng+hin`) only when they are in the selected sample.
 - **Images:** browser-side Tesseract.js OCR for supported image types.
 
@@ -214,14 +214,14 @@ After deployment, verify actual OAuth sign-in, Drive listing, content indexing, 
 
 The `main` branch is continuously validated by the production workflow. The release gate includes TypeScript checks, unit tests, production build, production asset-graph validation, bundle-size checks, a source-level Drive Trash/Delete guard, Worker dry-run, authenticated live Worker contract verification, GitHub Pages deployment, and live Pages JavaScript-module verification.
 
-The application is **release-ready for its implemented feature set** when the latest `main` workflow is green. A green workflow does not mean every Drive corpus, browser, OCR workload, or semantic-search query has been exhaustively validated.
+The application is **release-ready for its implemented feature set** when the latest `main` workflow is green. The current extraction implementation includes DOCM/XLSM and PPTX/PPTM browser-side text extraction; Office layout fidelity remains intentionally out of scope. A green workflow does not mean every Drive corpus, browser, OCR workload, or semantic-search query has been exhaustively validated.
 
 ## Current limitations
 
 - PDFs longer than 10 pages have bounded initial coverage; text found only on unselected middle pages may be missed. Deep checks add at most five middle pages and still do not cover a whole book.
 - The sparse-text OCR rule and duplicate thresholds are heuristics. OCR and embeddings can miss true copies or suggest unrelated same-topic files.
 - Semantic duplicate analysis is bounded to 500 profiles, 12 representative chunks per profile, and centroid-nearest shortlist pairs; results are not exhaustive proof.
-- Neural ranking weights and ANN recall are not validated on a representative production Drive corpus.
+- Neural ranking weights and ANN recall are not calibrated on a representative production Drive corpus; the ANN recall guard reduces risk but cannot prove exhaustive nearest-neighbor recall for every corpus.
 - Export-based hashes for native Google files identify the downloaded export bytes; different export representations can affect matching.
 - Browser-local IndexedDB can be cleared, evicted, or run out of quota; local data is not backed up by this repository.
 - The Drive OAuth scope is broad because moving arbitrary existing Drive files cannot be performed with the narrower `drive.file` scope. The application code intentionally exposes no Drive Trash/Delete operation; CI contains a source-level no-trash/delete guard. Token storage, plaintext local search/offline stores, and the XSS threat model are described in [SECURITY.md](SECURITY.md).
