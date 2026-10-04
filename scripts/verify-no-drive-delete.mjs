@@ -5,6 +5,7 @@ const EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.mjs']);
 async function walk(dir) {
   const out = [];
   for (const entry of await readdir(dir, { withFileTypes: true })) {
+    if (entry.isDirectory() && ['node_modules', 'dist', 'coverage'].includes(entry.name)) continue;
     const path = join(dir, entry.name);
     if (entry.isDirectory()) out.push(...await walk(path));
     else if (EXTENSIONS.has(path.slice(path.lastIndexOf('.')))) out.push(path);
