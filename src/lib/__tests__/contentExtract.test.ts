@@ -1,11 +1,18 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { canExtractText, extractDriveFileText } from '../contentExtract';
+import { canExtractText, extractDriveFileText, extractDriveFileTextWithTimeout } from '../contentExtract';
 import { MAX_INDEX_CHARS } from '../contentIndex';
 import { extractPdfTextWithOcr, selectPdfOcrPages, shouldOcrPdfPage } from '../ocrExtract';
 
 afterEach(() => vi.unstubAllGlobals());
 
 describe('extractDriveFileText truncation metadata', () => {
+  it('enforces the outer deadline when a Drive response never settles', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(() => undefined)));
+    await expect(
+      extractDriveFileTextWithTimeout('token', 'stalled-file', 'text/plain', 'stalled.txt', { timeoutMs: 10 }),
+    ).rejects.toThrow(/timed out after 0s/i);
+  });
+
   it('marks a response truncated when the streaming character cap is reached', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('x'.repeat(MAX_INDEX_CHARS + 10), { status: 200 })));
     const result = await extractDriveFileText('token', 'file-id', 'text/plain', 'long.txt');

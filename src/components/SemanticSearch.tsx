@@ -24,6 +24,8 @@ import { logDiag } from '../lib/diagnostics';
 import { PDF_EXTRACTION_POLICY_VERSION } from '../lib/ocrExtract';
 import { FolderCategorySuggestions } from './FolderCategorySuggestions';
 
+export const INDEX_FILES_PER_RUN = 50;
+
 interface SemanticSearchProps {
   files: DriveFile[];
   folders: FolderItem[];
@@ -306,13 +308,13 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
       return;
     }
 
-    const extractable = files.filter(
+    const allExtractable = files.filter(
       f =>
         f.isGoogleDriveItem &&
         canExtractText(f.mimeType, f.name) &&
         matchesSearchCategory(f, selectedCategory)
     );
-    if (!extractable.length) {
+    if (!allExtractable.length) {
       const msg =
         selectedCategory === 'all'
           ? 'No text-extractable Drive files in current list'
@@ -324,7 +326,7 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
     logDiag(
       'info',
       'index',
-      `start scope=${selectedCategory} extractable=${extractable.length} files=${files.length}`
+      `start scope=${selectedCategory} extractable=${allExtractable.length} files=${files.length}`
     );
 
     cancelIndexRef.current = false;
@@ -339,9 +341,9 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
     const scopeLabel =
       selectedCategory === 'all' ? 'all extractable' : selectedCategory;
     if (wakeOk) {
-      setIndexProgress(`Screen stay-awake on. Indexing ${scopeLabel} (${extractable.length})…`);
+      setIndexProgress(`Screen stay-awake on. Indexing next batch of ${Math.min(INDEX_FILES_PER_RUN, allExtractable.length)} from ${scopeLabel} (${allExtractable.length})…`);
     } else {
-      setIndexProgress(`Indexing ${scopeLabel} (${extractable.length})… keep tab open`);
+      setIndexProgress(`Indexing next batch of ${Math.min(INDEX_FILES_PER_RUN, allExtractable.length)} from ${scopeLabel} (${allExtractable.length})… keep tab open`);
     }
 
     let ok = 0;
@@ -352,21 +354,24 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
     let sampledPdf = 0;
     let semanticRefreshCounter = 0;
     const failedNames: string[] = [];
-    const n = extractable.length;
+    const n = allExtractable.length;
     const embeddingProvider = isEmbedConfigured()
       ? createEmbeddingProvider(() => getFirebaseIdToken())
       : null;
-    const sig = await buildIndexSignature(corpusKey, extractable, selectedCategory);
+    const sig = await buildIndexSignature(corpusKey, allExtractable, selectedCategory);
     let startAt = readCursor(sig, n);
+    const batchStart = startAt;
+    const extractable = allExtractable.slice(batchStart, batchStart + INDEX_FILES_PER_RUN);
+    const batchEnd = batchStart + extractable.length;
     if (startAt > 0) {
       setIndexProgress(`Resuming from ${startAt + 1}/${n} (${scopeLabel})…`);
     }
 
     try {
       const completed = new Set<number>();
-      let contiguousCursor = startAt;
+      let contiguousCursor = batchStart;
       const markCompleted = (i: number) => {
-        completed.add(i);
+        completed.add(batchStart + i);
         while (completed.has(contiguousCursor)) {
           completed.delete(contiguousCursor);
           contiguousCursor++;
@@ -388,8 +393,9 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
         }
 
         const f = extractable[i];
-        const pct = Math.round(((i + 1) / extractable.length) * 100);
-        setIndexProgress(`Checking ${i + 1}/${extractable.length} (${pct}%): ${f.name}`);
+        const globalIndex = batchStart + i;
+        const pct = Math.round(((globalIndex + 1) / n) * 100);
+        setIndexProgress(`Checking ${globalIndex + 1}/${n} (batch ${i + 1}/${extractable.length}, ${pct}%): ${f.name}`);
         try {
           const existing = await getIndexedDocument(f.id);
           const isPdf = f.mimeType === 'application/pdf' || /\.pdf$/i.test(f.name || '');
@@ -437,7 +443,7 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
             return;
           }
 
-          setIndexProgress(`Extracting ${i + 1}/${extractable.length} (${pct}%): ${f.name}`);
+          setIndexProgress(`Extracting ${globalIndex + 1}/${n} (batch ${i + 1}/${extractable.length}, ${pct}%): ${f.name}`);
           const {
             text,
             source,
@@ -522,12 +528,7 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
           ok++;
           markCompleted(i);
         } catch (err: any) {
-          if (
-            err instanceof ExtractAbortedError ||
-            err?.name === 'ExtractAbortedError' ||
-            indexController.signal.aborted ||
-            cancelIndexRef.current
-          ) {
+          if (indexController.signal.aborted || cancelIndexRef.current) {
             setIndexProgress(`Cancelled / timed out at ${i}/${extractable.length}. Resume available.`);
             logDiag('warn', 'index', `abort/timeout at ${i}`);
             return;
@@ -535,7 +536,7 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
           fail++;
           if (failedNames.length < 5) failedNames.push(f.name);
           console.warn('[SemanticSearch] index failed for', f.name, err);
-          logDiag('warn', 'index.file', `fail ${f.name}: ${err?.message || err}`);
+          logDiag('warn', 'index.file', `${err instanceof ExtractAbortedError || err?.name === 'ExtractAbortedError' ? 'timeout' : 'fail'} ${f.name}: ${err?.message || err}`);
           // Keep the cursor before failed files so a subsequent run retries them.
           return;
         }
@@ -545,8 +546,8 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
       // Bounded worker pool: a slow PDF/OCR/embedding request no longer serializes
       // every remaining file. Checkpoints advance only across contiguous completions,
       // so a later worker can finish without making resume skip unfinished work.
-      let nextIndex = startAt;
-      const workerCount = Math.min(3, Math.max(0, n - startAt));
+      let nextIndex = 0;
+      const workerCount = Math.min(3, extractable.length);
       const worker = async () => {
         while (!cancelIndexRef.current && !indexController.signal.aborted) {
           const i = nextIndex++;
@@ -573,6 +574,12 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
         setIndexProgress(retryMsg);
         setResumeFrom(contiguousCursor);
         logDiag('warn', 'index', retryMsg);
+      } else if (!cancelIndexRef.current && !indexController.signal.aborted && batchEnd < n) {
+        try { localStorage.removeItem(INDEX_RUN_KEY); } catch { /* ignore */ }
+        const batchMsg = `Batch complete: indexed ${ok}, skipped fresh ${skippedFresh}, failed ${fail}. Resume from ${batchEnd + 1}/${n}.`;
+        setIndexProgress(batchMsg);
+        setResumeFrom(batchEnd);
+        logDiag('info', 'index', batchMsg);
       }
     } finally {
       indexingActiveRef.current = false;

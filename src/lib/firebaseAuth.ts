@@ -264,6 +264,7 @@ export const googleSignIn = async (): Promise<{ user: any; accessToken: string }
       throw new Error('Could not obtain OAuth access token for Google Drive');
     }
     persistToken(credential.accessToken, 3600);
+    await linkFirebaseSession(credential.accessToken, result.user.email);
     return { user: result.user, accessToken: cachedAccessToken! };
   } catch (error: any) {
     const isPopupError =
