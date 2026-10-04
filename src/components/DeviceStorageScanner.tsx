@@ -237,7 +237,28 @@ export const DeviceStorageScanner: React.FC<Props> = ({ onSelectPreviewFile }) =
   });
 
   const selectedEntries = visible.filter(f => selected.has(f.id));
-  const duplicateSelected = selectedEntries.filter(f => f.isDuplicate);
+
+  // A move must never remove the last copy of an exact SHA-256 group.
+  const movableDuplicateIds = useMemo(() => {
+    const groups = new Map<string, PickedEntry[]>();
+    for (const entry of visible) {
+      if (!entry.isDuplicate || !entry.contentHash || !entry.verified) continue;
+      const list = groups.get(entry.contentHash) || [];
+      list.push(entry);
+      groups.set(entry.contentHash, list);
+    }
+    const ids = new Set<string>();
+    for (const group of groups.values()) {
+      if (group.length < 2) continue;
+      // Keep a deterministic survivor; only the remaining exact copies are movable.
+      for (const entry of group.slice(1)) ids.add(entry.id);
+    }
+    return ids;
+  }, [visible]);
+
+  const duplicateSelected = selectedEntries.filter(
+    f => f.isDuplicate && movableDuplicateIds.has(f.id)
+  );
 
   const moveSelected = async () => {
     setConfirmMove(false);
@@ -307,7 +328,7 @@ export const DeviceStorageScanner: React.FC<Props> = ({ onSelectPreviewFile }) =
     <div className="flex flex-wrap gap-2">
       <input value={query} onChange={e => setQuery(e.target.value)} placeholder="फ़ाइल नाम खोजें..." className="flex-1 min-w-[160px] px-3 py-2 rounded-xl border text-sm"/>
       <select value={source} onChange={e => setSource(e.target.value as 'all' | StorageSource)} className="px-3 py-2 rounded-xl border text-xs"><option value="all">Phone + SD</option><option value="phone_internal">Phone</option><option value="sd_card">SD</option></select>
-      <button type="button" onClick={() => setSelected(new Set(visible.filter(f => f.isDuplicate).map(f => f.id)))} className="px-3 py-2 rounded-xl border text-xs font-semibold">Select duplicates</button>
+      <button type="button" onClick={() => setSelected(new Set(visible.filter(f => movableDuplicateIds.has(f.id)).map(f => f.id)))} className="px-3 py-2 rounded-xl border text-xs font-semibold">Select duplicates</button>
     </div>
     <div className="flex flex-wrap items-center gap-2 text-xs">
       <span className="font-semibold">{visible.length} files • {visible.filter(f => f.isDuplicate).length} exact duplicates • {duplicateSelected.length} selected</span>
