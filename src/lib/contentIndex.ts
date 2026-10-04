@@ -165,7 +165,7 @@ export async function putIndexedDocument(doc: {
   const db = await openDb();
   // Vector storage is a separate database. Remove the old derived vectors first;
   // if that fails, keep the old text index rather than pairing new text with stale vectors.
-  if (!doc.preserveVectors) await removeVectorsForFile(doc.id);
+  if (!doc.preserveVectors) await removeVectorsForFile(doc.id, doc.corpusKey);
   await new Promise<void>((resolve, reject) => {
     const tx = db.transaction([DOC_STORE, CHUNK_STORE, POSTING_STORE], 'readwrite');
     const termBest = new Map<string, { tf: number; chunkIdx: number }>();

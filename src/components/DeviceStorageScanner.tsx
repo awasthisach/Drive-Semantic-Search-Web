@@ -3,6 +3,7 @@ import { CheckCircle2, CheckSquare, FolderOpen, Loader2, ShieldCheck, Square, X 
 import { FileCategory, DriveFile, StorageSource } from '../types';
 import { MOCK_DEVICE_FILES } from '../lib/deviceStorageMock';
 import { formatBytes } from '../lib/driveApi';
+import { copyAndVerifyLocalFile } from '../lib/localMove';
 
 type DirHandle = {
   kind: 'directory';
@@ -295,9 +296,7 @@ export const DeviceStorageScanner: React.FC<Props> = ({ onSelectPreviewFile }) =
             catch { break; }
           }
           const out = await target.getFileHandle(targetName, { create: true });
-          const writable = await out.createWritable();
-          await writable.write(file);
-          await writable.close();
+          await copyAndVerifyLocalFile(file, out, f.contentHash);
           await f.parentHandle.removeEntry(f.name);
           moved++;
         }

@@ -21,7 +21,7 @@ A browser-first progressive web app for Google Drive browsing, hybrid search, bo
 - **Offline pinning:** saves downloaded/exported bytes to a bounded local cache (nominal limits: 200 MB total and 80 files; browser quota may be lower).
 - **Encrypted vault:** encrypts vault payloads using PBKDF2-derived keys and AES-GCM. The vault does not encrypt separate search indexes or the offline cache.
 - **Local backup:** exports indexed text, semantic vectors, Drive metadata snapshots, and encrypted vault records to a passphrase-protected file. Restore validates first and merges records; offline-pinned file bytes are excluded.
-- **Device storage scanner:** reviews a user-selected phone/SD-card directory where the browser supports the File System Access API. It does not silently delete files.
+- **Device storage scanner:** reviews a user-selected phone/SD-card directory where the browser supports the File System Access API. It does not silently delete files; an explicitly selected exact duplicate is moved only after source re-hashing and final destination SHA-256 verification.
 - **PWA shell and diagnostics:** installable app shell with cached application assets, plus a bounded diagnostics buffer with token/email redaction on export.
 
 ## Search and indexing
