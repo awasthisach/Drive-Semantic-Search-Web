@@ -40,6 +40,18 @@ describe('fetchWithBackoff', () => {
     expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(2);
   });
 
+  it('retries a transient network failure on safe reads', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+      .mockResolvedValueOnce(new Response('ok', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const p = fetchWithBackoff('https://example.com', undefined, { maxRetries: 3, baseMs: 10 });
+    await vi.runAllTimersAsync();
+    expect((await p).status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it('does not retry a permission-denied 403', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: { message: 'forbidden' } }), { status: 403 }));
     vi.stubGlobal('fetch', fetchMock);
@@ -64,6 +76,15 @@ describe('fetchWithBackoff', () => {
     vi.stubGlobal('fetch', fetchMock);
     const res = await fetchWithBackoff('https://example.com', { method: 'POST' }, { maxRetries: 3, baseMs: 10 });
     expect(res.status).toBe(429);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not retry a non-idempotent POST after a network failure', async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new TypeError('Failed to fetch'));
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(
+      fetchWithBackoff('https://example.com', { method: 'POST' }, { maxRetries: 3, baseMs: 10 })
+    ).rejects.toThrow('Failed to fetch');
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
