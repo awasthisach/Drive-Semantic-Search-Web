@@ -238,10 +238,11 @@ export const DeviceStorageScanner: React.FC<Props> = ({ onSelectPreviewFile }) =
 
   const selectedEntries = visible.filter(f => selected.has(f.id));
 
-  // A move must never remove the last copy of an exact SHA-256 group.
+  // Decide the survivor from the complete scanned set, not the filtered/visible
+  // subset. This prevents search/filter/pagination from hiding the only survivor.
   const movableDuplicateIds = useMemo(() => {
     const groups = new Map<string, PickedEntry[]>();
-    for (const entry of visible) {
+    for (const entry of files) {
       if (!entry.isDuplicate || !entry.contentHash || !entry.verified) continue;
       const list = groups.get(entry.contentHash) || [];
       list.push(entry);
@@ -250,11 +251,12 @@ export const DeviceStorageScanner: React.FC<Props> = ({ onSelectPreviewFile }) =
     const ids = new Set<string>();
     for (const group of groups.values()) {
       if (group.length < 2) continue;
-      // Keep a deterministic survivor; only the remaining exact copies are movable.
-      for (const entry of group.slice(1)) ids.add(entry.id);
+      // Stable survivor: the lexicographically first full entry id is never movable.
+      const ordered = [...group].sort((a, b) => a.id.localeCompare(b.id));
+      for (const entry of ordered.slice(1)) ids.add(entry.id);
     }
     return ids;
-  }, [visible]);
+  }, [files]);
 
   const duplicateSelected = selectedEntries.filter(
     f => f.isDuplicate && movableDuplicateIds.has(f.id)
