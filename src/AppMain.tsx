@@ -285,7 +285,7 @@ export default function App() {
               onToggleStar={handleToggleStar}
               onToggleOffline={handleToggleOffline}
               accessToken={googleAccessToken}
-              onRequestToken={async () => (await ensureValidToken()) || googleAccessToken || (await getAccessToken())}
+              onRequestToken={ensureValidToken}
               corpusKey={makeCorpusKey(driveCorpus, sharedDriveId || undefined)}
             />
           </React.Suspense>

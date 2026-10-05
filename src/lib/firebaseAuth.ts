@@ -11,6 +11,7 @@ import {
   signOut,
 } from 'firebase/auth';
 import firebaseConfig from '../../firebase-applet-config.json';
+import { isAccessTokenExpired } from './tokenExpiry';
 
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 export const auth = getAuth(app);
@@ -61,9 +62,7 @@ function persistToken(token: string | null, expiresInSeconds?: number) {
 }
 
 function isTokenExpired(): boolean {
-  if (!cachedAccessToken) return true;
-  if (!tokenExpiresAt) return false;
-  return Date.now() >= tokenExpiresAt - 60_000;
+  return isAccessTokenExpired(cachedAccessToken, tokenExpiresAt);
 }
 
 /**
@@ -307,11 +306,11 @@ export const ensureValidToken = async (clientId?: string): Promise<string | null
   }
   const cid = clientId || (firebaseConfig as any).oAuthClientId;
   if (!cid || typeof window === 'undefined') {
-    return cachedAccessToken;
+    return null;
   }
   const google = (window as any).google;
   if (!google?.accounts?.oauth2) {
-    return cachedAccessToken;
+    return null;
   }
 
   return new Promise((resolve) => {
@@ -322,7 +321,7 @@ export const ensureValidToken = async (clientId?: string): Promise<string | null
         callback: (tokenResponse: any) => {
           if (tokenResponse.error || !tokenResponse.access_token) {
             console.warn('Silent token refresh failed:', tokenResponse.error);
-            resolve(cachedAccessToken);
+            resolve(null);
             return;
           }
           const expiresIn = Number(tokenResponse.expires_in) || 3600;
@@ -334,7 +333,7 @@ export const ensureValidToken = async (clientId?: string): Promise<string | null
       tokenClient.requestAccessToken({ prompt: '', login_hint: PREFERRED_GOOGLE_ACCOUNT });
     } catch (e) {
       console.warn('ensureValidToken error:', e);
-      resolve(cachedAccessToken);
+      resolve(null);
     }
   });
 };
