@@ -19,6 +19,7 @@ import { isEmbedConfigured } from '../lib/embeddings/config';
 import { isEmbeddingConsentGranted } from '../lib/embeddings/consent';
 import { createEmbeddingProvider } from '../lib/embeddings/client';
 import { getFirebaseIdToken } from '../lib/firebaseAuth';
+import { resolveDriveAccessToken } from '../lib/driveToken';
 import { paginateResults } from '../lib/pagination';
 import { logDiag } from '../lib/diagnostics';
 import { PDF_EXTRACTION_POLICY_VERSION } from '../lib/ocrExtract';
@@ -294,11 +295,15 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
   };
 
   const handleIndexContent = async () => {
-    let token = accessToken || null;
-    if (!token && onRequestToken) token = await onRequestToken();
+    let token: string | null;
+    try {
+      token = await resolveDriveAccessToken(accessToken, onRequestToken);
+    } catch {
+      token = null;
+    }
     if (!token) {
-      setIndexProgress('Sign in required to extract Drive content');
-      logDiag('warn', 'index', 'sign-in required');
+      setIndexProgress('Drive session expired or unavailable. Sign in again before indexing.');
+      logDiag('warn', 'index', 'valid Drive token unavailable before indexing');
       return;
     }
 
