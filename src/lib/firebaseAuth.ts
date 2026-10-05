@@ -19,12 +19,16 @@ export const SCOPES = [
   'https://www.googleapis.com/auth/drive',
 ];
 
+/** Preferred Google account for this VVF deployment's Drive session. */
+export const PREFERRED_GOOGLE_ACCOUNT = 'awasthi.sach@gmail.com';
+
 const provider = new GoogleAuthProvider();
 for (const scope of SCOPES) {
   provider.addScope(scope);
 }
 provider.setCustomParameters({
   prompt: 'select_account',
+  login_hint: PREFERRED_GOOGLE_ACCOUNT,
 });
 
 const TOKEN_KEY = 'gdrive_access_token';
@@ -168,7 +172,7 @@ export const requestGsiToken = async (clientId: string): Promise<{ user: Partial
         },
       });
 
-      tokenClient.requestAccessToken({ prompt: '' });
+      tokenClient.requestAccessToken({ prompt: '', login_hint: PREFERRED_GOOGLE_ACCOUNT });
     } catch (err: any) {
       reject(err);
     }
@@ -327,7 +331,7 @@ export const ensureValidToken = async (clientId?: string): Promise<string | null
           resolve(tokenResponse.access_token);
         },
       });
-      tokenClient.requestAccessToken({ prompt: '' });
+      tokenClient.requestAccessToken({ prompt: '', login_hint: PREFERRED_GOOGLE_ACCOUNT });
     } catch (e) {
       console.warn('ensureValidToken error:', e);
       resolve(cachedAccessToken);
