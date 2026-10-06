@@ -7,7 +7,7 @@ import { MoveToFolderModal } from './components/MoveToFolderModal';
 import { AuthErrorModal } from './components/AuthErrorModal';
 import { SemanticSearch } from './components/SemanticSearch';
 import { useDriveApp } from './hooks/useDriveApp';
-import { downloadDiagnostics } from './lib/diagnostics';
+import { downloadDiagnostics, getDiagnostics } from './lib/diagnostics';
 import {
   isEmbeddingConsentGranted,
   revokeEmbeddingConsent,
@@ -86,6 +86,7 @@ export default function App() {
   const [consentModalOpen, setConsentModalOpen] = React.useState(false);
   const [embedConsentOn, setEmbedConsentOn] = React.useState(() => isEmbeddingConsentGranted());
   const [firebaseEmbedReady, setFirebaseEmbedReady] = React.useState(false);
+  const [firebaseAuthErrorCode, setFirebaseAuthErrorCode] = React.useState<string | null>(null);
   const [deepCheckBusy, setDeepCheckBusy] = React.useState(false);
 
   React.useEffect(() => {
@@ -96,7 +97,18 @@ export default function App() {
         return;
       }
       const idToken = await getFirebaseIdToken();
-      if (!cancelled) setFirebaseEmbedReady(Boolean(idToken));
+      if (!cancelled) {
+        setFirebaseEmbedReady(Boolean(idToken));
+        if (idToken) {
+          setFirebaseAuthErrorCode(null);
+        } else {
+          const latestFailure = getDiagnostics()
+            .filter(event => event.source === 'firebaseAuth' && event.level === 'error')
+            .at(-1);
+          const code = latestFailure?.message.match(/\((auth\/[a-z0-9-]+|unknown)\)/)?.[1] || null;
+          setFirebaseAuthErrorCode(code);
+        }
+      }
     };
     void check();
     const timer = window.setInterval(() => { void check(); }, 5000);
@@ -217,7 +229,11 @@ export default function App() {
               className={`text-[10px] px-2 py-1 rounded-full border ${firebaseEmbedReady ? 'border-emerald-300 text-emerald-700' : 'border-amber-300 text-amber-700'}`}
               title={firebaseEmbedReady ? 'Firebase Authenticated for embedding requests' : 'Google Drive is connected, but Firebase Auth is not ready for embedding requests'}
             >
-              {firebaseEmbedReady ? 'Firebase embedding auth' : 'Firebase auth needed'}
+              {firebaseEmbedReady
+                ? 'Firebase embedding auth'
+                : firebaseAuthErrorCode
+                  ? `Firebase auth error · ${firebaseAuthErrorCode}`
+                  : 'Firebase auth needed'}
             </span>
           ) : null}
           <button type="button" onClick={downloadDiagnostics} className="text-xs px-2 py-1 rounded-lg border border-zinc-200 dark:border-zinc-700" title="Export local diagnostics JSON (tokens redacted)">Diagnostics</button>

@@ -12,6 +12,8 @@ import {
 } from 'firebase/auth';
 import firebaseConfig from '../../firebase-applet-config.json';
 import { isAccessTokenExpired } from './tokenExpiry';
+import { logDiag } from './diagnostics';
+import { describeFirebaseAuthFailure } from './firebaseAuthDiagnostics';
 
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 export const auth = getAuth(app);
@@ -103,6 +105,7 @@ async function linkFirebaseSession(
     );
     return result.user;
   } catch (e) {
+    logDiag('error', 'firebaseAuth', describeFirebaseAuthFailure(e));
     console.warn(
       '[firebaseAuth] Firebase session link skipped (neural search will be unavailable):',
       e
