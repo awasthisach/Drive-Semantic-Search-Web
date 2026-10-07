@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { FolderItem } from '../../types';
-import { averageEmbedding, buildFolderEmbeddingText, buildFolderPathLabel, rankFolderSuggestions } from '../categorySuggestions';
+import { averageEmbedding, buildFolderEmbeddingText, buildFolderPathLabel, canSuggestFolders, rankFolderSuggestions } from '../categorySuggestions';
 
 const folders: FolderItem[] = [
   { id: 'root-books', name: 'Books', color: 'blue' },
@@ -9,6 +9,13 @@ const folders: FolderItem[] = [
 ];
 
 describe('folder category suggestions', () => {
+  it('disables the Suggest folders action until its prerequisites are ready', () => {
+    expect(canSuggestFolders({ hasSelectedFile: false, hasFolders: true, loading: false })).toBe(false);
+    expect(canSuggestFolders({ hasSelectedFile: true, hasFolders: false, loading: false })).toBe(false);
+    expect(canSuggestFolders({ hasSelectedFile: true, hasFolders: true, loading: true })).toBe(false);
+    expect(canSuggestFolders({ hasSelectedFile: true, hasFolders: true, loading: false })).toBe(true);
+  });
+
   it('builds a folder label using existing Drive parent/name metadata', () => {
     expect(buildFolderPathLabel(folders[1], folders)).toBe('Books / Physics');
     expect(buildFolderEmbeddingText(folders[1], folders)).toContain('Books / Physics');
