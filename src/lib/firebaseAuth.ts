@@ -19,6 +19,9 @@ const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 export const auth = getAuth(app);
 
 export const SCOPES = [
+  'openid',
+  'email',
+  'profile',
   'https://www.googleapis.com/auth/drive',
 ];
 
@@ -163,7 +166,7 @@ export const requestGsiToken = async (clientId: string): Promise<{ user: Partial
 
           const firebaseUser = await linkFirebaseSession(accessToken, googleEmail);
           if (!firebaseUser) {
-            reject(new Error('Firebase rejected the Google access token; trying Firebase sign-in.'));
+            reject(new Error('firebase-link-failed: Firebase rejected the Google access token.'));
             return;
           }
 
@@ -266,6 +269,9 @@ export const googleSignIn = async (): Promise<{ user: any; accessToken: string }
       if (isCancelled) {
         console.info('GSI sign-in dismissed by user.');
         return null;
+      }
+      if (String(gsiErr?.message || '').includes('firebase-link-failed')) {
+        throw gsiErr;
       }
       console.warn('GSI token request skipped, trying Firebase popup fallback:', gsiErr?.message || gsiErr);
       primaryError = gsiErr;
