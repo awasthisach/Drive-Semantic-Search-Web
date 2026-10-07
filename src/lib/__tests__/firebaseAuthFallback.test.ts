@@ -47,7 +47,7 @@ vi.mock('firebase/auth', () => ({
 
 vi.mock('../diagnostics', () => ({ logDiag: vi.fn() }));
 
-describe('googleSignIn Firebase fallback', () => {
+describe('googleSignIn Firebase credential handling', () => {
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
@@ -59,13 +59,8 @@ describe('googleSignIn Firebase fallback', () => {
     vi.unstubAllGlobals();
   });
 
-  it('uses Firebase popup when a valid Drive token is rejected for Firebase auth', async () => {
+  it('surfaces Firebase credential rejection without opening the invalid-action popup loop', async () => {
     const popupUser = { email: 'user@example.com', displayName: 'Test User' };
-    mocks.signInWithPopup.mockImplementation(async () => {
-      // Firebase's popup flow establishes the Firebase user before returning.
-      mocks.auth.currentUser = popupUser;
-      return { user: popupUser, credential: { accessToken: 'firebase-popup-drive-token' } };
-    });
 
     const initTokenClient = vi.fn(({ callback }: { callback: (response: any) => Promise<void> }) => ({
       requestAccessToken: () => {
@@ -79,10 +74,9 @@ describe('googleSignIn Firebase fallback', () => {
     })));
 
     const { googleSignIn } = await import('../firebaseAuth');
-    const result = await googleSignIn();
+    await expect(googleSignIn()).rejects.toThrow('firebase-link-failed');
 
     expect(mocks.signInWithCredential).toHaveBeenCalledTimes(1);
-    expect(mocks.signInWithPopup).toHaveBeenCalledTimes(1);
-    expect(result).toEqual({ user: popupUser, accessToken: 'firebase-popup-drive-token' });
+    expect(mocks.signInWithPopup).not.toHaveBeenCalled();
   });
 });
