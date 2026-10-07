@@ -247,6 +247,11 @@ export const googleSignIn = async (): Promise<{ user: any; accessToken: string }
   isSigningIn = true;
   let primaryError: any = null;
 
+  // Load GIS on demand before choosing the Drive token flow. If this is not
+  // ready, the Firebase popup fallback can fail with an opaque invalid-action
+  // handler page even though the Google Drive OAuth client is configured.
+  await ensureGsiLoaded();
+
   if (typeof window !== 'undefined' && (window as any).google?.accounts?.oauth2 && firebaseConfig.oAuthClientId) {
     try {
       const gsiResult = await requestGsiToken(firebaseConfig.oAuthClientId);
