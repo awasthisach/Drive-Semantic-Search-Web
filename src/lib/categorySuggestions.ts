@@ -7,6 +7,14 @@ export interface RankedFolderSuggestion {
   score: number;
 }
 
+export function canSuggestFolders(options: {
+  hasSelectedFile: boolean;
+  hasFolders: boolean;
+  loading: boolean;
+}): boolean {
+  return options.hasSelectedFile && options.hasFolders && !options.loading;
+}
+
 export function buildFolderPathLabels(folders: FolderItem[]): Map<string, string> {
   const byId = new Map(folders.map(folder => [folder.id, folder]));
   const labels = new Map<string, string>();

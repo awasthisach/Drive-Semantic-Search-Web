@@ -11,6 +11,7 @@ import { isLegacyTitleEmbeddingChunk } from '../lib/contentIndex';
 import {
   averageEmbedding,
   buildFolderEmbeddingTexts,
+  canSuggestFolders,
   rankFolderSuggestions,
   type RankedFolderSuggestion,
 } from '../lib/categorySuggestions';
@@ -211,7 +212,11 @@ export const FolderCategorySuggestions: React.FC<FolderCategorySuggestionsProps>
         <button
           type="button"
           onClick={() => void suggestFolders()}
-          disabled={loading || !folders.length}
+          disabled={!canSuggestFolders({
+            hasSelectedFile: Boolean(selectedFile),
+            hasFolders: folders.length > 0,
+            loading,
+          })}
           className="inline-flex items-center gap-1 px-3 py-2 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-[11px] font-bold disabled:opacity-50"
         >
           {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
