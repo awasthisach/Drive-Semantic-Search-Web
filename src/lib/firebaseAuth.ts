@@ -162,12 +162,16 @@ export const requestGsiToken = async (clientId: string): Promise<{ user: Partial
           }
 
           const firebaseUser = await linkFirebaseSession(accessToken, googleEmail);
+          if (!firebaseUser) {
+            reject(new Error('Firebase rejected the Google access token; trying Firebase sign-in.'));
+            return;
+          }
 
           resolve({
             user: {
-              displayName: googleName || firebaseUser?.displayName || 'Google Drive User',
-              email: googleEmail || firebaseUser?.email || '',
-              photoURL: googlePicture || firebaseUser?.photoURL || '',
+              displayName: googleName || firebaseUser.displayName || 'Google Drive User',
+              email: googleEmail || firebaseUser.email || '',
+              photoURL: googlePicture || firebaseUser.photoURL || '',
             } as any,
             accessToken,
           });
