@@ -12,7 +12,7 @@ import {
   ConsentRequiredError,
 } from './embeddings/client';
 import { getFirebaseIdToken } from './firebaseAuth';
-import { searchNeuralByEmbedding } from './vectorIndex';
+import { MIN_NEURAL_COSINE_SCORE, searchNeuralByEmbedding } from './vectorIndex';
 import { logDiag } from './diagnostics';
 
 /** Provisional hybrid weights (must sum ~1). Not final without eval. */
@@ -21,6 +21,23 @@ export const HYBRID_WEIGHTS = {
   bm25: 0.25,
   metadata: 0.2,
 } as const;
+
+/** Keep BM25-only hits competitive when neural search finds hits for other files. */
+export const LEXICAL_FLOOR_WEIGHT = 0.5;
+
+export function scoreNeuralHybridCandidate(neuralN: number, bm25N: number, metaN: number): number {
+  const weighted = Math.round(
+    HYBRID_WEIGHTS.neural * neuralN +
+      HYBRID_WEIGHTS.bm25 * bm25N +
+      HYBRID_WEIGHTS.metadata * metaN
+  );
+  if (neuralN > 0 || bm25N <= 0) return weighted;
+
+  const lexicalFloor = Math.round(
+    LEXICAL_FLOOR_WEIGHT * bm25N + HYBRID_WEIGHTS.metadata * metaN
+  );
+  return Math.max(weighted, lexicalFloor);
+}
 
 /**
  * Session-local query embedding cache. Interactive search often reuses the same
@@ -124,7 +141,7 @@ async function tryNeuralSearch(
         succeeded++;
         const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
         const hits = await searchNeuralByEmbedding(qVec, corpusKey, {
-          minScore: -1,
+          minScore: MIN_NEURAL_COSINE_SCORE,
           topK: 200,
           liveFileIds,
           onMetrics: metrics => {
@@ -247,11 +264,7 @@ export async function runHybridSearch(
     const reasons: string[] = [...meta.reasons];
 
     if (neuralPipelineOk) {
-      score = Math.round(
-        HYBRID_WEIGHTS.neural * neuralN +
-          HYBRID_WEIGHTS.bm25 * bm25N +
-          HYBRID_WEIGHTS.metadata * metaN
-      );
+      score = scoreNeuralHybridCandidate(neuralN, bm25N, metaN);
       if (neuralN > 0) reasons.unshift(`Semantic ${neuralN}`);
       if (bm25N > 0) reasons.push('Content body match');
     } else {
@@ -287,8 +300,8 @@ export async function runHybridSearch(
   return results.sort((a, b) => b.score - a.score);
 }
 
-/** Sync metadata-only search (Dashboard quick filter). */
-export function runSemanticSearch(
+/** Sync metadata-only search (Dashboard quick filter); it does not run neural/content search. */
+export function runMetadataSearch(
   query: string,
   files: DriveFile[],
   filterCategory?: string

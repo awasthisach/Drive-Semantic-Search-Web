@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { runSemanticSearch } from '../searchEngine';
+import { runMetadataSearch } from '../searchEngine';
 import type { DriveFile } from '../../types';
 
 const base: DriveFile = {
@@ -19,21 +19,21 @@ const base: DriveFile = {
   isGoogleDriveItem: true,
 };
 
-describe('runSemanticSearch', () => {
+describe('runMetadataSearch', () => {
   it('matches filename keywords', () => {
-    const results = runSemanticSearch('fiscal audit', [base]);
+    const results = runMetadataSearch('fiscal audit', [base]);
     expect(results.length).toBe(1);
     expect(results[0].score).toBeGreaterThan(0);
   });
 
   it('filters by google_drive category', () => {
     const local = { ...base, id: '2', isGoogleDriveItem: false, name: 'local fiscal' };
-    const results = runSemanticSearch('fiscal', [base, local], 'google_drive');
+    const results = runMetadataSearch('fiscal', [base, local], 'google_drive');
     expect(results.every(r => r.file.isGoogleDriveItem)).toBe(true);
   });
 
   it('browse mode when query empty (score 0, not ranked relevance)', () => {
-    const results = runSemanticSearch('', [base]);
+    const results = runMetadataSearch('', [base]);
     expect(results.length).toBe(1);
     expect(results[0].score).toBe(0);
     expect(results[0].relevanceReason).toMatch(/Browse/i);
@@ -47,7 +47,7 @@ describe('runSemanticSearch', () => {
       name: 'Random notes.txt',
       semanticSummary: 'Someone mentioned budget casually once',
     };
-    const results = runSemanticSearch('Budget 2024', [exact, weak]);
+    const results = runMetadataSearch('Budget 2024', [exact, weak]);
     expect(results[0].file.id).toBe('1');
     expect(results[0].score).toBeGreaterThan(results.find(r => r.file.id === '2')?.score ?? 0);
   });
@@ -60,7 +60,7 @@ describe('runSemanticSearch', () => {
       semanticSummary: 'This is a report about the team',
       tags: [],
     };
-    const results = runSemanticSearch('report', [many]);
+    const results = runMetadataSearch('report', [many]);
     if (results.length) {
       expect(results[0].score).toBeLessThan(50);
     }
@@ -74,7 +74,7 @@ describe('runSemanticSearch', () => {
       semanticSummary: 'Google Drive file of type application/pdf',
       tags: [],
     };
-    expect(runSemanticSearch('report', [f]).length).toBe(1);
+    expect(runMetadataSearch('report', [f]).length).toBe(1);
   });
 
   it('starred irrelevant file excluded when no match', () => {
@@ -86,6 +86,6 @@ describe('runSemanticSearch', () => {
       tags: [],
       semanticSummary: 'Google Drive file "Hemp law Adm.pdf" of type application/pdf',
     };
-    expect(runSemanticSearch('tinywow_cannabis indica', [junk]).length).toBe(0);
+    expect(runMetadataSearch('tinywow_cannabis indica', [junk]).length).toBe(0);
   });
 });
