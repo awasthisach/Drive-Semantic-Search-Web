@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import { DriveFile, FileCategory, VaultFile, FolderItem, AppTab } from '../types';
 import { formatBytes } from '../lib/driveApi';
-import { runSemanticSearch } from '../lib/searchEngine';
+import { runMetadataSearch } from '../lib/searchEngine';
 import { DriveFileTypeFilter, DriveCorpus, SharedDriveInfo } from '../lib/googleDriveService';
 import { FileTypeSelector } from './FileTypeSelector';
 import { MoveToFolderModal } from './MoveToFolderModal';
@@ -66,7 +66,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
     else if (filterCategory !== 'all') list = list.filter(f => f.category === filterCategory);
 
     if (!searchTerm.trim()) return list;
-    const ranked = runSemanticSearch(searchTerm, list, 'all');
+    const ranked = runMetadataSearch(searchTerm, list, 'all');
     return ranked.map(r => r.file);
   }, [files, filterCategory, searchTerm]);
 
