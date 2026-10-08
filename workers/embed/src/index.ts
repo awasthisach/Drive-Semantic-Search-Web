@@ -1,4 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
+import { checkRateLimitBucket } from './rateLimit';
 
 /**
  * Authenticated /embed proxy — Phase 3 hardened.
@@ -33,20 +34,26 @@ const JWKS_TTL_MS = 60 * 60 * 1000;
 export class UserRateLimiter extends DurableObject<Env> {
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
-    const limit = Math.max(1, Math.min(1000, Number(url.searchParams.get('limit') || 30)));
+    const configuredLimit = Number(url.searchParams.get('limit') || 30);
     const now = Date.now();
     const current = await this.ctx.storage.get<{ count: number; resetAt: number }>('bucket');
-    const bucket = !current || now >= current.resetAt
-      ? { count: 0, resetAt: now + 60_000 }
-      : current;
-    if (bucket.count >= limit) {
+    const decision = checkRateLimitBucket(current, now, configuredLimit);
+    if (!decision.allowed) {
+      if (decision.logLimitEvent) {
+        await this.ctx.storage.put('bucket', decision.bucket);
+        console.warn({
+          event: 'rate_limit_window_exceeded',
+          count: decision.bucket.count,
+          limit: decision.limit,
+          retryAfterSeconds: decision.retryAfterSeconds,
+        });
+      }
       return Response.json({
         allowed: false,
-        retryAfterSeconds: Math.max(1, Math.ceil((bucket.resetAt - now) / 1000)),
+        retryAfterSeconds: decision.retryAfterSeconds,
       });
     }
-    bucket.count += 1;
-    await this.ctx.storage.put('bucket', bucket);
+    await this.ctx.storage.put('bucket', decision.bucket);
     return Response.json({ allowed: true, retryAfterSeconds: 0 });
   }
 }
