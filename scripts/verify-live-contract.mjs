@@ -7,6 +7,7 @@ if (!endpoint || !/^https:\/\//.test(endpoint)) throw new Error('EMBED_ENDPOINT 
 const endpointUrl = new URL(endpoint);
 const embedPath = endpointUrl.pathname === '/' ? '/embed' : endpointUrl.pathname;
 const healthEndpoint = endpointUrl.origin + '/';
+const appOrigin = 'https://awasthisach.github.io';
 
 const expectedModel = 'gemini-embedding-2';
 const expectedVersion = '3';
@@ -33,7 +34,7 @@ async function getFirebaseIdToken() {
     'https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=' + encodeURIComponent(apiKey),
     {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Referer: 'https://awasthisach.github.io/Drive-Semantic-Search-Web/' },
+      headers: { 'Content-Type': 'application/json', Referer: appOrigin + '/Drive-Semantic-Search-Web/' },
       body: JSON.stringify({ email, password, returnSecureToken: true }),
     }
   );
@@ -52,7 +53,7 @@ if (!health.ok || !healthBody || healthBody.model !== expectedModel || healthBod
 }
 const unauth = await fetch(healthEndpoint.replace(/\/$/, '') + embedPath, {
   method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
+  headers: { 'Content-Type': 'application/json', Origin: appOrigin },
   body: JSON.stringify({ texts: ['unauthenticated contract probe'], mode: 'query', version: '3' }),
 });
 if (unauth.status !== 401) throw new Error('Live Worker auth gate expected HTTP 401, got ' + unauth.status);
@@ -66,7 +67,7 @@ if (allowUnauthenticated) {
 async function verify(mode, texts, version, expectedResponseVersion = version) {
   const response = await fetch(healthEndpoint.replace(/\/$/, '') + embedPath, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+    headers: { 'Content-Type': 'application/json', Origin: appOrigin, Authorization: 'Bearer ' + token },
     body: JSON.stringify({ texts, mode, version }),
   });
   const body = await response.json().catch(() => null);
