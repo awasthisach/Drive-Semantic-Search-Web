@@ -19,13 +19,10 @@
     "format:check": "node -e \"console.log('Prettier not required in CI; run npx prettier --write src if desired')\""
   },
   "dependencies": {
-    "@tailwindcss/vite": "4.3.3",
-    "@vitejs/plugin-react": "5.2.0",
     "firebase": "12.19.0",
     "lucide-react": "0.546.0",
     "react": "19.3.0",
-    "react-dom": "19.3.0",
-    "vite": "6.4.3"
+    "react-dom": "19.3.0"
   },
   "overrides": {
     "@grpc/grpc-js": ">=1.13.6",
@@ -40,6 +37,9 @@
     "tailwindcss": "4.3.3",
     "typescript": "5.8.3",
     "vite-plugin-pwa": "1.3.0",
-    "vitest": "5.0.1"
+    "vitest": "5.0.1",
+    "@tailwindcss/vite": "4.3.3",
+    "@vitejs/plugin-react": "5.2.0",
+    "vite": "6.4.4"
   }
 }
