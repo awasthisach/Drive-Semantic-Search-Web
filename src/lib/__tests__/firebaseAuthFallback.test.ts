@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => {
   const auth: { currentUser: any } = { currentUser: null };
   const signInWithPopup = vi.fn();
   const signInWithCredential = vi.fn();
+  const requestAccessToken = vi.fn();
 
   class MockGoogleAuthProvider {
     addScope = vi.fn();
@@ -16,6 +17,7 @@ const mocks = vi.hoisted(() => {
     auth,
     signInWithPopup,
     signInWithCredential,
+    requestAccessToken,
     MockGoogleAuthProvider,
     initializeApp: vi.fn(() => ({})),
     getApps: vi.fn(() => []),
@@ -63,7 +65,8 @@ describe('googleSignIn Firebase credential handling', () => {
     const popupUser = { email: 'user@example.com', displayName: 'Test User' };
 
     const initTokenClient = vi.fn(({ callback }: { callback: (response: any) => Promise<void> }) => ({
-      requestAccessToken: () => {
+      requestAccessToken: (config: Record<string, unknown>) => {
+        mocks.requestAccessToken(config);
         void callback({ access_token: 'gsi-drive-token', expires_in: 3600 });
       },
     }));
@@ -78,5 +81,6 @@ describe('googleSignIn Firebase credential handling', () => {
 
     expect(mocks.signInWithCredential).toHaveBeenCalledTimes(1);
     expect(mocks.signInWithPopup).not.toHaveBeenCalled();
+    expect(mocks.requestAccessToken).toHaveBeenCalledWith({ prompt: 'select_account' });
   });
 });

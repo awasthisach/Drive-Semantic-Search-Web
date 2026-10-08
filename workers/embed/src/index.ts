@@ -221,7 +221,7 @@ export default {
       return json({ error: 'POST only' }, 405, corsOrigin);
     }
 
-    if (request.headers.get('Origin') && !originOk) {
+    if (!request.headers.get('Origin') || !originOk) {
       return json({ error: 'origin not allowed' }, 403, allowedOrigin);
     }
 
