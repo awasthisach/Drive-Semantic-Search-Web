@@ -19,6 +19,9 @@ const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 export const auth = getAuth(app);
 
 export const SCOPES = [
+  'openid',
+  'email',
+  'profile',
   'https://www.googleapis.com/auth/drive',
 ];
 
@@ -162,12 +165,16 @@ export const requestGsiToken = async (clientId: string): Promise<{ user: Partial
           }
 
           const firebaseUser = await linkFirebaseSession(accessToken, googleEmail);
+          if (!firebaseUser) {
+            reject(new Error('firebase-link-failed: Firebase rejected the Google access token.'));
+            return;
+          }
 
           resolve({
             user: {
-              displayName: googleName || firebaseUser?.displayName || 'Google Drive User',
-              email: googleEmail || firebaseUser?.email || '',
-              photoURL: googlePicture || firebaseUser?.photoURL || '',
+              displayName: googleName || firebaseUser.displayName || 'Google Drive User',
+              email: googleEmail || firebaseUser.email || '',
+              photoURL: googlePicture || firebaseUser.photoURL || '',
             } as any,
             accessToken,
           });
@@ -243,6 +250,11 @@ export const googleSignIn = async (): Promise<{ user: any; accessToken: string }
   isSigningIn = true;
   let primaryError: any = null;
 
+  // Load GIS on demand before choosing the Drive token flow. If this is not
+  // ready, the Firebase popup fallback can fail with an opaque invalid-action
+  // handler page even though the Google Drive OAuth client is configured.
+  await ensureGsiLoaded();
+
   if (typeof window !== 'undefined' && (window as any).google?.accounts?.oauth2 && firebaseConfig.oAuthClientId) {
     try {
       const gsiResult = await requestGsiToken(firebaseConfig.oAuthClientId);
@@ -257,6 +269,9 @@ export const googleSignIn = async (): Promise<{ user: any; accessToken: string }
       if (isCancelled) {
         console.info('GSI sign-in dismissed by user.');
         return null;
+      }
+      if (String(gsiErr?.message || '').includes('firebase-link-failed')) {
+        throw gsiErr;
       }
       console.warn('GSI token request skipped, trying Firebase popup fallback:', gsiErr?.message || gsiErr);
       primaryError = gsiErr;

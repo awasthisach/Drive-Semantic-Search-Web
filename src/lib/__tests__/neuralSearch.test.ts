@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { rankVectorsByQueryEmbedding, type VectorRecord } from '../vectorIndex';
+import { MIN_NEURAL_COSINE_SCORE, rankVectorsByQueryEmbedding, type VectorRecord } from '../vectorIndex';
 import { neuralToDisplayScore } from '../searchEngine';
 import { cosineSimilarity } from '../embeddings/vector';
 
@@ -84,11 +84,23 @@ describe('rankVectorsByQueryEmbedding', () => {
     expect(hits[0].snippet).toContain('strong match');
   });
 
-  it('does not discard a valid low-cosine vector by default', () => {
-    const q = vec(11);
-    const low = rec('low', 0, vec(12), 'lower semantic similarity');
-    const hits = rankVectorsByQueryEmbedding(q, [low]);
-    expect(hits).toHaveLength(1);
+  it('rejects near-zero cosine noise by default at the production threshold', () => {
+    const q = new Array(768).fill(0);
+    q[0] = 1;
+    const below = new Array(768).fill(0);
+    below[0] = 0.21;
+    below[1] = Math.sqrt(1 - 0.21 ** 2);
+    const above = new Array(768).fill(0);
+    above[0] = 0.23;
+    above[1] = Math.sqrt(1 - 0.23 ** 2);
+    const hits = rankVectorsByQueryEmbedding(q, [
+      rec('noise', 0, below, 'near-zero noise'),
+      rec('match', 0, above, 'above-threshold match'),
+    ]);
+
+    expect(MIN_NEURAL_COSINE_SCORE).toBe(0.22);
+    expect(hits.map(hit => hit.fileId)).toEqual(['match']);
+    expect(hits[0].score).toBeCloseTo(0.23, 5);
   });
 });
 

@@ -534,6 +534,8 @@ export interface NeuralHit {
   chunkIdx: number;
 }
 
+export const MIN_NEURAL_COSINE_SCORE = 0.22;
+
 export function rankVectorsByQueryEmbedding(
   queryEmbedding: number[],
   vectors: VectorRecord[],
@@ -549,7 +551,7 @@ export function rankVectorsByQueryEmbedding(
   const model = opts?.embeddingModel ?? EMBED_CONFIG.model;
   const version = opts?.embeddingVersion ?? EMBED_CONFIG.version;
   const dimension = opts?.dimension ?? EMBED_CONFIG.dimension;
-  const minScore = opts?.minScore ?? -1;
+  const minScore = opts?.minScore ?? MIN_NEURAL_COSINE_SCORE;
   const topK = opts?.topK ?? 200;
   const live = opts?.liveFileIds;
   if (!queryEmbedding.length || queryEmbedding.length !== dimension || queryEmbedding.some(v => !Number.isFinite(v))) {
