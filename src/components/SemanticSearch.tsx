@@ -23,6 +23,7 @@ import { resolveDriveAccessToken } from '../lib/driveToken';
 import { paginateResults } from '../lib/pagination';
 import { logDiag } from '../lib/diagnostics';
 import { PDF_EXTRACTION_POLICY_VERSION } from '../lib/ocrExtract';
+import { getIndexBatchTransition } from '../lib/indexBatchTransition';
 import { FolderCategorySuggestions } from './FolderCategorySuggestions';
 
 export const INDEX_FILES_PER_RUN = 50;
@@ -563,7 +564,16 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
       };
       await Promise.all(Array.from({ length: workerCount }, () => worker()));
 
-      if (!cancelIndexRef.current && !indexController.signal.aborted && contiguousCursor >= n) {
+      const transition = getIndexBatchTransition({
+        total: n,
+        batchEnd,
+        contiguousCursor,
+        failures: fail,
+        cancelled: cancelIndexRef.current,
+        aborted: indexController.signal.aborted,
+      });
+
+      if (transition.kind === 'done') {
         clearCursor();
         try { localStorage.removeItem(INDEX_RUN_KEY); } catch { /* ignore */ }
         setResumeFrom(0);
@@ -575,15 +585,15 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
             (failedNames.length ? `. Failed: ${failedNames.join(', ')}` : '');
         setIndexProgress(doneMsg);
         logDiag('info', 'index', doneMsg);
-      } else if (!cancelIndexRef.current && !indexController.signal.aborted && fail > 0) {
+      } else if (transition.kind === 'retry') {
         const retryMsg = `Indexing paused with ${fail} failed file${fail === 1 ? '' : 's'}. Successful work is saved; retry from ${contiguousCursor + 1}/${n}.` + (failedNames.length ? ` Failed: ${failedNames.join(', ')}` : '');
         setIndexProgress(retryMsg);
-        setResumeFrom(contiguousCursor);
+        setResumeFrom(transition.resumeFrom);
         logDiag('warn', 'index', retryMsg);
-      } else if (!cancelIndexRef.current && !indexController.signal.aborted && batchEnd < n) {
-        const batchMsg = `Batch complete: indexed ${ok}, skipped fresh ${skippedFresh}, failed ${fail}. Resume from ${batchEnd + 1}/${n}.`;
+      } else if (transition.kind === 'continue') {
+        const batchMsg = `Batch complete: indexed ${ok}, skipped fresh ${skippedFresh}, failed ${fail}. Resume from ${transition.resumeFrom + 1}/${n}.`;
         setIndexProgress(batchMsg);
-        setResumeFrom(batchEnd);
+        setResumeFrom(transition.resumeFrom);
         continueAutomatically = true;
         logDiag('info', 'index', batchMsg);
       }
