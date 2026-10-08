@@ -360,6 +360,7 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
     let semanticRefreshCounter = 0;
     const failedNames: string[] = [];
     const n = allExtractable.length;
+    let continueAutomatically = false;
     const embeddingProvider = isEmbedConfigured()
       ? createEmbeddingProvider(() => getFirebaseIdToken())
       : null;
@@ -580,10 +581,10 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
         setResumeFrom(contiguousCursor);
         logDiag('warn', 'index', retryMsg);
       } else if (!cancelIndexRef.current && !indexController.signal.aborted && batchEnd < n) {
-        try { localStorage.removeItem(INDEX_RUN_KEY); } catch { /* ignore */ }
         const batchMsg = `Batch complete: indexed ${ok}, skipped fresh ${skippedFresh}, failed ${fail}. Resume from ${batchEnd + 1}/${n}.`;
         setIndexProgress(batchMsg);
         setResumeFrom(batchEnd);
+        continueAutomatically = true;
         logDiag('info', 'index', batchMsg);
       }
     } finally {
@@ -592,6 +593,12 @@ export const SemanticSearch: React.FC<SemanticSearchProps> = ({
       setIndexing(false);
       await releaseWakeLock();
       await refreshIndexedCount();
+      if (continueAutomatically && !cancelIndexRef.current) {
+        // Yield between bounded batches so progress can render and the next
+        // invocation can read the durable, contiguous completion cursor.
+        autoResumeAttemptedRef.current = true;
+        window.setTimeout(() => void handleIndexContent(), 0);
+      }
     }
   };
 
